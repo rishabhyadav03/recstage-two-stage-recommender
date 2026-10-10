@@ -1,9 +1,8 @@
 # RecStage: Two-Stage Recommendation System
 
-A production-grade movie recommendation engine combining deep two-tower vector retrieval (FAISS) and gradient-boosted re-ranking (LightGBM LambdaRank) on the MovieLens 1M dataset, paired with an editorial web application.
+An end-to-end movie recommendation engine combining deep two-tower vector retrieval (FAISS) and gradient-boosted re-ranking (LightGBM LambdaRank) on the MovieLens 1M dataset, paired with an editorial web application.
 
-- **Live Demo**: `https://recstage.demo.example.com` *(placeholder)*
-- **API Base**: `https://api.recstage.demo.example.com` *(placeholder)*
+- **Live Demo**: coming soon
 
 ---
 
@@ -25,10 +24,10 @@ Industrial recommendation engines operate in two distinct stages to balance cata
 
 1. **Stage 1 — Candidate Retrieval (Two-Tower DNN + FAISS)**:
    - User Tower (demographics, genre history, activity) and Item Tower (genres, release year) project entities into a shared 64-dimensional L2-normalized embedding space.
-   - A FAISS IVF-Flat index retrieves the top 200 most relevant candidates from 3,883 movies in ~1.5 ms using cosine similarity.
+   - A FAISS IVF-Flat index retrieves the top 200 most relevant candidates from 3,883 movies in ~0.5 ms using cosine similarity.
 2. **Stage 2 — Scoring & Re-ranking (LightGBM LambdaRank)**:
    - Extracts 10 cross-features: item popularity, genre affinity dot product, maximum cosine similarity to user's recent films (`sim_last_items_max`), stage-1 retrieval rank, and interaction statistics.
-   - Re-ranks candidates with listwise ranking to optimize ranking order, outputting the final top 10 in ~2.8 ms.
+   - Re-ranks candidates with listwise ranking to optimize ranking order in ~2.8 ms (3.3 ms end-to-end p50 latency).
 
 ---
 
@@ -53,6 +52,8 @@ Evaluated on 3,563 test users using a strict **leave-last-out temporal split** (
 | **Ranker w/o Cosine Similarity** | 17.04% | 39.94% | 51.75% | 0.0893 | 0.4999 | 9.87 | 1.55 ms |
 | **Ranker w/o User Features** | 17.06% | 39.66% | 51.42% | 0.0868 | 0.4977 | 9.87 | 1.18 ms |
 
+The variants without cosine similarity (NDCG@10 0.0893; paired bootstrap mean diff −0.0031, 95% CI [−0.0061, −0.0002]) and without user features (NDCG@10 0.0868; paired bootstrap mean diff −0.0007, 95% CI [−0.0033, +0.0016]) score equal to or slightly higher than the full ranker (0.0859). Because `stage1_rank_inv` carries 71.5% of the feature importance, the ranker mostly preserves the retrieval order and adds small adjustments. This implies that a simpler ranker (such as the variant omitting user features) is just as effective and faster in production, dropping end-to-end p50 latency from 3.29 ms to 1.18 ms. In accordance with strict ML discipline, models are not selected or tuned based on test numbers.
+
 ### Honest Metrics Note
 - **Diagnosis of Prior Ranker Defect**: An earlier iteration of the Stage-2 ranker exhibited severe performance degradation (NDCG@10 0.0072 vs 0.0838 for retrieval alone, worse than a random shuffle of candidates). Investigation identified a critical training bug: when positive target items were not retrieved in Stage 1, they were artificially appended to the end of candidate groups (assigning them the lowest Stage-1 rank reciprocal and low similarity scores), while previously-consumed training items were marked as positive candidates. This taught the model inverted weights for Stage-1 retrieval signals (negated scores actually outperformed the model).
 - **The Resolution**: The ranker training pipeline was rebuilt with:
@@ -60,7 +61,13 @@ Evaluated on 3,563 test users using a strict **leave-last-out temporal split** (
   2. **Inference-consistent candidate groups**: Groups of 200 candidates retrieved from Stage 1 without artificial target appending.
   3. **Graded relevance**: Ratings $\ge 5 \to 2$, rating $4 \to 1$, and unobserved/low ratings $\to 0$.
   4. **Validation early stopping**: Model trained with early stopping on validation NDCG@10 (`val_df`, leave-second-out), completely separate from the test split.
-- **Outcome**: The retrained Two-Stage pipeline outperforms a random candidate shuffle by >5x and beats Two-Tower retrieval on both validation (NDCG@10 **0.1117** vs 0.1026, Recall@10 **20.60%** vs 19.51%) and test (NDCG@10 **0.0859** vs 0.0838, Recall@10 **16.84%** vs 16.22%).
+- **Outcome & Statistical Bootstrap Checks**:
+  - The retrained Two-Stage pipeline outperforms a random candidate shuffle by >5x on the test set (NDCG@10 **0.0859** vs 0.0163).
+  - On the validation set, Two-Stage improved over Two-Tower retrieval alone (NDCG@10 **0.1117** vs 0.1026, Recall@10 **20.60%** vs 19.51%). However, this validation gain is not an independent estimate because validation was used for early stopping.
+  - A paired bootstrap over all 3,563 test users (1,000 resamples, fixed seed 42) shows:
+    - **NDCG@10**: Mean difference +0.0021, with a 95% confidence interval of [−0.0019, +0.0058].
+    - **Recall@10**: Mean difference +0.0062, with a 95% confidence interval of [−0.0020, +0.0143].
+    Because both 95% confidence intervals include zero, the improvement of the Two-Stage pipeline over Two-Tower retrieval is not statistically distinguishable from zero on the test set.
 - **Top Feature Importances (LambdaRank)**:
   1. `stage1_rank_inv`: **71.5%** (Inverse retrieval rank from Stage 1)
   2. `sim_last_items_max`: **5.4%** (Max cosine similarity to user's recent watches)
@@ -197,7 +204,7 @@ cp .env.example .env
 ## Held-Out Test Check
 
 On the **Compare** page (`/compare`), each user profile displays a **Held-Out Check**:
-- During preprocessing, each user's final interaction is partitioned into the test split (`test_ratings.dat`) and excluded from training and index creation.
+- During dataset preprocessing in `ml/data/splits.py`, each user's chronological interaction sequence is partitioned via leave-last-out: the user's final interaction is assigned to `test_df`, the second-to-last to `val_df`, and all prior ratings to `train_df`. No static `test_ratings.dat` file is created or stored; splits are generated deterministically in memory and cached in `data/processed/`.
 - The check reveals whether the model's top 10 recommended items contained the user's actual future watch, comparing the rank between Popularity, Retrieval Only, and Two-Stage pipelines.
 
 ---
@@ -205,7 +212,7 @@ On the **Compare** page (`/compare`), each user profile displays a **Held-Out Ch
 ## Limitations & Future Work
 
 1. **Static Catalog**: The MovieLens 1M dataset spans films up to the year 2000. Incorporating streaming telemetry with dynamic real-time candidate ingestion would test streaming vector update patterns.
-2. **Cold-Start Users**: For users with under 35 interactions, NDCG@10 is 0.1020. Integrating content-based cross-attention and text embeddings (BERT/sentence-transformers) on movie synopses would further improve cold-start performance.
+2. **Cold-Start Cohort Dynamics**: Infrequent viewers (the bottom 20% by training interaction volume, defined as users with $\le 34$ ratings; $N = 760$) score an NDCG@10 of **0.1020**, which is higher than the overall population test score of **0.0859**. Diagnostic analysis reveals this occurs because infrequent users' held-out items are predominantly mainstream blockbusters with high training popularity (averaging 1,037.4 training ratings vs 824.2 for warmer users), making them significantly easier for both retrieval and ranking models to score in the top 10 than the niche long-tail titles watched by active users. True cold-start challenges arise when serving completely unseen movies or zero-history users; integrating text representations (e.g. BERT/sentence-transformers on movie synopses) would provide priors for fresh catalog entries.
 3. **Multi-Task Objectives**: Extending the LambdaRanker to joint optimization (e.g. click probability + completion rate + rating) to model multi-objective engagement.
 
 ---

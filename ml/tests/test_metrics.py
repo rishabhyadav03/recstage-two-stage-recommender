@@ -9,6 +9,7 @@ from ml.evaluate import (
     catalog_coverage,
     intra_list_diversity,
     novelty_score,
+    paired_bootstrap_difference,
 )
 
 
@@ -76,3 +77,32 @@ def test_novelty_score():
     score = novelty_score([0, 1], pop, total_interactions=1000)
     expected = (-np.log2(0.01) - np.log2(0.1)) / 2.0
     assert pytest.approx(score, 1e-4) == expected
+
+
+def test_paired_bootstrap_difference():
+    # 1. Identical inputs: diff is 0, includes_zero is True
+    a = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    res_zero = paired_bootstrap_difference(a, a, num_bootstrap=500, seed=42)
+    assert pytest.approx(res_zero["mean_diff"], 1e-5) == 0.0
+    assert res_zero["includes_zero"] is True
+    assert res_zero["ci_lower"] <= 0.0 <= res_zero["ci_upper"]
+
+    # 2. Strictly positive difference: includes_zero is False
+    b = a + 0.5
+    res_pos = paired_bootstrap_difference(b, a, num_bootstrap=500, seed=42)
+    assert pytest.approx(res_pos["mean_diff"], 1e-5) == 0.5
+    assert res_pos["includes_zero"] is False
+    assert res_pos["ci_lower"] > 0.0
+
+    # 3. Determinism with seed
+    res1 = paired_bootstrap_difference(b, a, num_bootstrap=200, seed=123)
+    res2 = paired_bootstrap_difference(b, a, num_bootstrap=200, seed=123)
+    assert res1 == res2
+
+    # 4. Length mismatch raises AssertionError
+    with pytest.raises(AssertionError):
+        paired_bootstrap_difference(np.array([1.0]), np.array([1.0, 2.0]))
+
+    # 5. Empty array handling
+    empty_res = paired_bootstrap_difference(np.array([]), np.array([]))
+    assert empty_res["includes_zero"] is True

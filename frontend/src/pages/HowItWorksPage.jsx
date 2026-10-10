@@ -2,6 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { formatLatency } from '../utils/formatters';
 import { apiUrl } from '../utils/api';
 
+const FEATURE_META = {
+  stage1_rank_inv: { category: 'Pipeline Signal', role: 'Reciprocal position of candidate in FAISS Stage-1 output', defaultImp: 0.715 },
+  sim_last_items_max: { category: 'Contextual Cross', role: "Max cosine similarity to user's recent watches", defaultImp: 0.054 },
+  item_popularity: { category: 'Item Prior', role: 'Log rating count across training corpus', defaultImp: 0.051 },
+  recency: { category: 'Temporal Prior', role: 'Normalized release year of the movie', defaultImp: 0.043 },
+  two_tower_sim: { category: 'Latent Representation', role: 'Raw cosine dot product between UserTower and ItemTower embeddings', defaultImp: 0.035 },
+  sim_last_items_mean: { category: 'Contextual Cross', role: "Mean similarity across the user's active history", defaultImp: 0.033 },
+  user_activity: { category: 'User Profile', role: 'Total ratings count for the user', defaultImp: 0.025 },
+  item_mean_rating: { category: 'Quality Prior', role: 'Historical average star rating of the candidate item', defaultImp: 0.023 },
+  genre_affinity: { category: 'User-Item Affinity', role: 'Dot product between user genre history and item genre vector', defaultImp: 0.014 },
+  user_mean_rating: { category: 'User Calibration', role: 'Mean rating bias of the user', defaultImp: 0.007 },
+};
+
 export default function HowItWorksPage() {
   const [metrics, setMetrics] = useState(null);
 
@@ -12,9 +25,21 @@ export default function HowItWorksPage() {
       .catch((e) => console.error("Could not fetch metrics:", e));
   }, []);
 
-  const retrievalP50 = metrics?.['Two-Tower Retrieval']?.latency_p50_ms;
-  const rankerP50 = metrics?.['Two-Stage (Two-Tower + Ranker)']?.ranking_latency_p50_ms;
-  const totalP50 = metrics?.['Two-Stage (Two-Tower + Ranker)']?.latency_p50_ms;
+  const retrievalP50 = metrics?.['Two-Tower Retrieval']?.latency_p50_ms ?? 0.5;
+  const rankerP50 = metrics?.['Two-Stage (Two-Tower + Ranker)']?.ranking_latency_p50_ms ?? 2.8;
+  const totalP50 = metrics?.['Two-Stage (Two-Tower + Ranker)']?.latency_p50_ms ?? 3.3;
+
+  const importances = metrics?.error_analysis?.feature_importances;
+  const featureRows = Object.entries(FEATURE_META).map(([key, meta]) => {
+    const rawVal = importances && importances[key] != null ? importances[key] : meta.defaultImp;
+    return {
+      key,
+      category: meta.category,
+      role: meta.role,
+      pct: (rawVal * 100).toFixed(1) + '%',
+      rawVal,
+    };
+  }).sort((a, b) => b.rawVal - a.rawVal);
 
   return (
     <div>
@@ -102,7 +127,7 @@ export default function HowItWorksPage() {
           <span>
             End-to-end recommendation generation completes in{' '}
             <strong className="text-text-main font-numeric">
-              {totalP50 != null ? `${Number(totalP50).toFixed(1)} ms` : '4.8 ms'}
+              {totalP50 != null ? `${Number(totalP50).toFixed(1)} ms` : '3.3 ms'}
             </strong>{' '}
             (p50) on a single CPU core.
           </span>
@@ -134,66 +159,16 @@ export default function HowItWorksPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">sim_last_items_max</td>
-                <td className="py-3 px-3 text-text-muted">Contextual Cross</td>
-                <td className="py-3 px-3 text-right font-numeric font-semibold text-accent">30.4%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Max cosine similarity to user's last 5 watched movies</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">item_popularity</td>
-                <td className="py-3 px-3 text-text-muted">Item Prior</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">18.3%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Log rating count across training corpus</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">item_mean_rating</td>
-                <td className="py-3 px-3 text-text-muted">Quality Prior</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">13.3%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Historical average star rating of the candidate item</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">genre_affinity</td>
-                <td className="py-3 px-3 text-text-muted">User-Item Affinity</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">9.8%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Dot product between user genre history and item genre vector</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">stage1_rank_inv</td>
-                <td className="py-3 px-3 text-text-muted">Pipeline Signal</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">9.1%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Reciprocal position of candidate in FAISS Stage-1 output</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">sim_last_items_mean</td>
-                <td className="py-3 px-3 text-text-muted">Contextual Cross</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">7.6%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Mean similarity across the user's active session history</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">two_tower_sim</td>
-                <td className="py-3 px-3 text-text-muted">Latent Representation</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">4.9%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Raw cosine dot product between UserTower and ItemTower embeddings</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">user_activity</td>
-                <td className="py-3 px-3 text-text-muted">User Profile</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">2.9%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Total ratings count for the user</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">recency</td>
-                <td className="py-3 px-3 text-text-muted">Temporal Prior</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">2.1%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Normalized release year of the movie</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">user_mean_rating</td>
-                <td className="py-3 px-3 text-text-muted">User Calibration</td>
-                <td className="py-3 px-3 text-right font-numeric font-medium">1.5%</td>
-                <td className="py-3 px-3 text-text-muted hidden sm:table-cell">Mean rating bias of the user</td>
-              </tr>
+              {featureRows.map((feat, idx) => (
+                <tr key={feat.key}>
+                  <td className="py-3 px-2 font-medium text-text-main font-mono text-xs">{feat.key}</td>
+                  <td className="py-3 px-3 text-text-muted">{feat.category}</td>
+                  <td className={`py-3 px-3 text-right font-numeric ${idx === 0 ? 'font-semibold text-accent' : 'font-medium'}`}>
+                    {feat.pct}
+                  </td>
+                  <td className="py-3 px-3 text-text-muted hidden sm:table-cell">{feat.role}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

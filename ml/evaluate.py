@@ -101,6 +101,45 @@ def novelty_score(
     return float(np.mean(info))
 
 
+def paired_bootstrap_difference(
+    scores_a: np.ndarray,
+    scores_b: np.ndarray,
+    num_bootstrap: int = 1000,
+    seed: int = 42,
+    ci: float = 0.95,
+) -> Dict[str, Any]:
+    """
+    Compute paired bootstrap confidence interval for mean difference (scores_a - scores_b).
+    """
+    scores_a = np.asarray(scores_a, dtype=np.float64)
+    scores_b = np.asarray(scores_b, dtype=np.float64)
+    assert len(scores_a) == len(scores_b), "Input score arrays must have the same length"
+    n = len(scores_a)
+    if n == 0:
+        return {"mean_diff": 0.0, "ci_lower": 0.0, "ci_upper": 0.0, "includes_zero": True}
+
+    diff = scores_a - scores_b
+    mean_diff = float(np.mean(diff))
+
+    rng = np.random.RandomState(seed)
+    boot_means = np.empty(num_bootstrap, dtype=np.float64)
+    for i in range(num_bootstrap):
+        idx = rng.randint(0, n, size=n)
+        boot_means[i] = np.mean(diff[idx])
+
+    alpha = (1.0 - ci) / 2.0
+    ci_lower = float(np.percentile(boot_means, alpha * 100))
+    ci_upper = float(np.percentile(boot_means, (1.0 - alpha) * 100))
+    includes_zero = bool(ci_lower <= 0.0 <= ci_upper)
+
+    return {
+        "mean_diff": float(round(mean_diff, 6)),
+        "ci_lower": float(round(ci_lower, 6)),
+        "ci_upper": float(round(ci_upper, 6)),
+        "includes_zero": includes_zero,
+    }
+
+
 class Evaluator:
     """Evaluates recommendation models on a test set."""
 

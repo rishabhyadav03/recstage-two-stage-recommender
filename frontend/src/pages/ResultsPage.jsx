@@ -177,6 +177,10 @@ export default function ResultsPage() {
             </tbody>
           </table>
         </div>
+
+        <p className="text-xs text-text-muted mt-2 leading-relaxed">
+          <strong className="text-text-main">Paired bootstrap check (1,000 resamples, 95% CI):</strong> Mean difference for Two-Stage vs Two-Tower is +0.0021 on NDCG@10 (95% CI [−0.0019, +0.0058]) and +0.0062 on Recall@10 (95% CI [−0.0020, +0.0143]). Because both intervals span zero, the test-set difference is not statistically distinguishable from zero.
+        </p>
       </section>
 
       {/* 3. Visual Comparisons: Recall@K & NDCG@10 Charts in Warm Palette with Muted Gridlines */}
@@ -309,7 +313,7 @@ export default function ResultsPage() {
         </div>
 
         <p className="text-xs sm:text-sm text-text-muted leading-relaxed pt-2">
-          <strong className="text-text-main">Ablation finding:</strong> The Stage-2 LambdaRanker successfully refines Two-Tower candidates across both retrieval similarity and fine-grained item features, maintaining precision without leaking downstream interactions.
+          <strong className="text-text-main">Ablation interpretation:</strong> Variants without cosine similarity (NDCG@10 0.0893, 95% CI Δ [−0.0061, −0.0002]) and without user features (NDCG@10 0.0868, 95% CI Δ [−0.0033, +0.0016]) perform equal to or slightly higher than the full ranker. Because Stage-1 retrieval rank carries 71.5% of the feature importance, the ranker mostly preserves retrieval order with small adjustments. A simpler ranker (e.g. w/o user features) is just as effective and faster in production (1.18 ms vs 3.29 ms p50 latency).
         </p>
       </section>
 
@@ -349,6 +353,10 @@ export default function ResultsPage() {
             <div className="text-xs text-text-muted">vs {((ts["Hit@10"] || ts["Recall@10"] || 0) * 100).toFixed(2)}% overall</div>
           </div>
         </div>
+
+        <p className="text-xs text-text-muted mt-2 leading-relaxed">
+          <strong className="text-text-main">Cold-start cohort note:</strong> Infrequent viewers (≤34 interactions, bottom 20% of users, 760 users) score higher NDCG@10 (0.1020 vs 0.0859 overall) because their held-out test items are predominantly mainstream blockbuster titles with high training support (averaging 1,037 training ratings vs 824 for warmer users), which are easier for the model to rank accurately than the long tail.
+        </p>
       </section>
     </div>
   );
