@@ -42,24 +42,36 @@ Evaluated on 3,563 test users using a strict **leave-last-out temporal split** (
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Popularity Baseline** | 4.77% | 17.79% | 27.59% | 0.0222 | 4.77% | 0.6376 | 8.62 | 0.06 ms | 0.12 ms |
 | **Matrix Factorization (BPR)** | 6.71% | 23.29% | 35.45% | 0.0315 | 6.71% | 0.6942 | 9.00 | 0.71 ms | 2.84 ms |
-| **Two-Tower Retrieval (FAISS)** | **16.22%** | **38.76%** | **50.69%** | **0.0838** | **16.22%** | 0.4985 | 9.90 | 0.54 ms | 1.07 ms |
-| **Two-Stage (Two-Tower + Ranker)** | 1.66% | 9.29% | 17.82% | 0.0072 | 1.66% | **0.6987** | **10.38** | 4.80 ms | 9.65 ms |
+| **Two-Tower Retrieval (FAISS)** | 16.22% | 38.76% | 50.69% | 0.0838 | 16.22% | 0.4985 | 9.90 | 0.54 ms | 1.07 ms |
+| **Two-Stage (Two-Tower + Ranker)** | **16.84%** | **39.55%** | **51.45%** | **0.0859** | **16.84%** | 0.4970 | 9.88 | 3.29 ms | 6.23 ms |
 
 ### Ablation Studies
 
 | Model Variant | Recall@10 | Recall@50 | Recall@100 | NDCG@10 | Diversity@10 | Novelty@10 | p50 Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Ranker w/o Cosine Similarity** | 1.68% | 8.98% | 17.74% | 0.0076 | 0.7031 | 10.30 | 4.65 ms |
-| **Ranker w/o User Features** | 2.50% | 10.05% | 17.82% | 0.0131 | 0.7035 | 9.98 | 4.90 ms |
+| **Full Two-Stage Ranker** | 16.84% | 39.55% | 51.45% | 0.0859 | 0.4970 | 9.88 | 3.29 ms |
+| **Ranker w/o Cosine Similarity** | 17.04% | 39.94% | 51.75% | 0.0893 | 0.4999 | 9.87 | 1.55 ms |
+| **Ranker w/o User Features** | 17.06% | 39.66% | 51.42% | 0.0868 | 0.4977 | 9.87 | 1.18 ms |
 
 ### Honest Metrics Note
-- **Why Two-Tower achieves higher single-item test Recall@10 than the Two-Stage Ranker**: In a leave-last-out offline benchmark with a single target test film per user, Two-Tower embeddings match the global user preference directly. The Stage 2 LambdaRanker is trained to balance engagement, genre diversity, and high-rating probability. As a result, the Ranker trades off single-item exact match hit rate for catalog diversity (+40% over Two-Tower) and novelty (10.38 vs 9.90), avoiding filter bubbles.
+- **Diagnosis of Prior Ranker Defect**: An earlier iteration of the Stage-2 ranker exhibited severe performance degradation (NDCG@10 0.0072 vs 0.0838 for retrieval alone, worse than a random shuffle of candidates). Investigation identified a critical training bug: when positive target items were not retrieved in Stage 1, they were artificially appended to the end of candidate groups (assigning them the lowest Stage-1 rank reciprocal and low similarity scores), while previously-consumed training items were marked as positive candidates. This taught the model inverted weights for Stage-1 retrieval signals (negated scores actually outperformed the model).
+- **The Resolution**: The ranker training pipeline was rebuilt with:
+  1. **Strict temporal multi-cutoff grouping**: Multiple cutoffs per user from `train_df`, ensuring user representation and features strictly precede the cutoff timestamp with zero downstream leakage.
+  2. **Inference-consistent candidate groups**: Groups of 200 candidates retrieved from Stage 1 without artificial target appending.
+  3. **Graded relevance**: Ratings $\ge 5 \to 2$, rating $4 \to 1$, and unobserved/low ratings $\to 0$.
+  4. **Validation early stopping**: Model trained with early stopping on validation NDCG@10 (`val_df`, leave-second-out), completely separate from the test split.
+- **Outcome**: The retrained Two-Stage pipeline outperforms a random candidate shuffle by >5x and beats Two-Tower retrieval on both validation (NDCG@10 **0.1117** vs 0.1026, Recall@10 **20.60%** vs 19.51%) and test (NDCG@10 **0.0859** vs 0.0838, Recall@10 **16.84%** vs 16.22%).
 - **Top Feature Importances (LambdaRank)**:
-  1. `sim_last_items_max`: **30.4%** (Max similarity to recent watches)
-  2. `item_popularity`: **18.0%** (Catalog popularity rank)
-  3. `stage1_rank_inv`: **13.9%** (Inverse retrieval rank from Stage 1)
-  4. `item_mean_rating`: **12.9%** (Average historical movie rating)
-  5. `genre_affinity`: **11.4%** (User-genre profile overlap)
+  1. `stage1_rank_inv`: **71.5%** (Inverse retrieval rank from Stage 1)
+  2. `sim_last_items_max`: **5.4%** (Max cosine similarity to user's recent watches)
+  3. `item_popularity`: **5.1%** (Catalog popularity log-count from training split)
+  4. `recency`: **4.3%** (Normalized release year prior)
+  5. `two_tower_sim`: **3.5%** (Two-Tower embedding dot product)
+  6. `sim_last_items_mean`: **3.3%** (Mean similarity to recent watches)
+  7. `user_activity`: **2.5%** (Historical user log interaction volume)
+  8. `item_mean_rating`: **2.3%** (Historical item mean rating in train split)
+  9. `genre_affinity`: **1.4%** (User-genre profile alignment)
+  10. `user_mean_rating`: **0.7%** (User rating baseline)
 
 ---
 
@@ -170,7 +182,7 @@ cp .env.example .env
 │   ├── data/               # MovieLens download, preprocessing, and splits
 │   ├── features/           # Re-ranking feature engineering
 │   ├── models/             # TwoTowerModel, VectorIndex, LambdaRanker, baselines
-│   ├── tests/              # 32 pytest unit and integration tests
+│   ├── tests/              # 35 pytest unit and integration tests
 │   ├── evaluate.py         # Benchmark evaluation runner
 │   ├── train_ranker.py     # Stage 2 LambdaRank training
 │   └── train_retrieval.py  # Stage 1 Two-Tower training
@@ -193,7 +205,7 @@ On the **Compare** page (`/compare`), each user profile displays a **Held-Out Ch
 ## Limitations & Future Work
 
 1. **Static Catalog**: The MovieLens 1M dataset spans films up to the year 2000. Incorporating streaming telemetry with dynamic real-time candidate ingestion would test streaming vector update patterns.
-2. **Cold-Start Users**: For users with under 35 interactions, NDCG@10 drops to 0.0057. Integrating content-based cross-attention and text embeddings (BERT/sentence-transformers) on movie synopses would improve cold-start performance.
+2. **Cold-Start Users**: For users with under 35 interactions, NDCG@10 is 0.1020. Integrating content-based cross-attention and text embeddings (BERT/sentence-transformers) on movie synopses would further improve cold-start performance.
 3. **Multi-Task Objectives**: Extending the LambdaRanker to joint optimization (e.g. click probability + completion rate + rating) to model multi-objective engagement.
 
 ---
