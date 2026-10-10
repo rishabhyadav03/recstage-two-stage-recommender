@@ -23,25 +23,6 @@ A production-grade movie recommendation engine combining deep two-tower vector r
 
 Industrial recommendation engines operate in two distinct stages to balance catalog scale with ranking precision:
 
-```mermaid
-graph LR
-    subgraph Stage 1: Candidate Retrieval (~1.5 ms)
-        User[User ID & History] --> TowerU[User Tower DNN]
-        TowerU --> UEmb[64-dim User Vector]
-        Catalog[3,883 Catalog Movies] --> TowerI[Item Tower DNN]
-        TowerI --> IEmb[64-dim Item Vectors]
-        UEmb --> FAISS[FAISS IVF-Flat Index]
-        IEmb --> FAISS
-        FAISS --> Candidates[Top 200 Candidates]
-    end
-
-    subgraph Stage 2: Heavy Re-ranking (~2.8 ms)
-        Candidates --> FeatEng[Feature Engineering<br/>Affinity, Recency, Max Sim]
-        FeatEng --> Ranker[LightGBM LambdaRank]
-        Ranker --> FinalTop10[Top 10 Final Recommendations]
-    end
-```
-
 1. **Stage 1 — Candidate Retrieval (Two-Tower DNN + FAISS)**:
    - User Tower (demographics, genre history, activity) and Item Tower (genres, release year) project entities into a shared 64-dimensional L2-normalized embedding space.
    - A FAISS IVF-Flat index retrieves the top 200 most relevant candidates from 3,883 movies in ~1.5 ms using cosine similarity.
