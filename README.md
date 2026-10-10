@@ -1,285 +1,183 @@
-# 🎬 RecStage: Production-Grade Two-Stage Recommendation Engine
+# RecStage: Two-Stage Recommendation System
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![LightGBM](https://img.shields.io/badge/LightGBM-4.0+-brightgreen.svg)](https://lightgbm.readthedocs.io/)
-[![FAISS](https://img.shields.io/badge/FAISS-IVF--Flat-orange.svg)](https://github.com/facebookresearch/faiss)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Async-009688.svg)](https://fastapi.tiangolo.com/)
-[![React + Vite](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61dafb.svg)](https://vitejs.dev/)
-[![Tests](https://img.shields.io/badge/Tests-32%2F32%20Passing-success.svg)](https://pytest.org/)
+A production-grade movie recommendation engine combining deep two-tower vector retrieval (FAISS) and gradient-boosted re-ranking (LightGBM LambdaRank) on the MovieLens 1M dataset, paired with an editorial web application.
 
-An end-to-end, production-grade **Two-Stage Recommendation System** built on MovieLens 1M. Implements high-throughput deep retrieval candidate generation with **Two-Tower DNN + FAISS IVF-Flat**, followed by contextual re-ranking with **LightGBM LambdaRank**, served via an asynchronous **FastAPI** backend and an interactive **React + Vite** dashboard.
+- **Live Demo**: `https://recstage.demo.example.com` *(placeholder)*
+- **API Base**: `https://api.recstage.demo.example.com` *(placeholder)*
 
 ---
 
-## 📐 System Architecture
+## Previews
 
-Modern recommendation engines (e.g. YouTube, Pinterest, Netflix) cannot evaluate hundreds of thousands of candidate items with complex models within strict latency budgets (<10ms). RecStage implements the canonical industrial two-stage paradigm:
+| Recommend Page (Hero & Grid) | Compare Mode (3 Stages Side-by-Side) |
+| :---: | :---: |
+| ![Recommend Preview](docs/screenshots/recommend.png) | ![Compare Preview](docs/screenshots/compare.png) |
+
+| User Taste Profile & 2D Embedding Map | How It Works Architecture Walkthrough |
+| :---: | :---: |
+| ![Taste Map Preview](docs/screenshots/taste-map.png) | ![How It Works Preview](docs/screenshots/how-it-works.png) |
+
+---
+
+## Architecture
+
+Industrial recommendation engines operate in two distinct stages to balance catalog scale with ranking precision:
 
 ```mermaid
-flowchart TD
-    subgraph Data ["Data & Offline Pre-processing"]
-        ML[MovieLens 1M Dataset\n6,040 Users | 3,883 Movies | 1,000,209 Ratings]
-        Split[Strict Temporal Split\nTrain: 988k | Val: 6k | Test: 6k\nZero Leakage Verified]
-        ML --> Split
+graph LR
+    subgraph Stage 1: Candidate Retrieval (~1.5 ms)
+        User[User ID & History] --> TowerU[User Tower DNN]
+        TowerU --> UEmb[64-dim User Vector]
+        Catalog[3,883 Catalog Movies] --> TowerI[Item Tower DNN]
+        TowerI --> IEmb[64-dim Item Vectors]
+        UEmb --> FAISS[FAISS IVF-Flat Index]
+        IEmb --> FAISS
+        FAISS --> Candidates[Top 200 Candidates]
     end
 
-    subgraph Stage1 ["Stage 1: Candidate Generation (Retrieval)"]
-        UserIn[User Demographic & History Features\nAge, Gender, Occupation, Mean Rating, Genre Hist, Last 5 Items]
-        ItemIn[Item Features\nMovie ID, Genre Multi-Hot, Release Year, Popularity Bucket]
-        UserTower[User Tower DNN\nDense 64-D L2 Normalized]
-        ItemTower[Item Tower DNN\nDense 64-D L2 Normalized]
-        Loss[Sampled Softmax\nLogQ Popularity Correction]
-        FAISS[FAISS IVF-Flat Vector Index\n3,883 Items Indexed]
-        
-        UserIn --> UserTower
-        ItemIn --> ItemTower
-        UserTower & ItemTower --> Loss
-        ItemTower -. Offline Build .-> FAISS
-        UserTower -->|Query Vector| FAISS
-        FAISS -->|Top-200 Candidates\n~0.54ms p50| Candidates[200 Candidate Items]
-    end
-
-    subgraph Stage2 ["Stage 2: Contextual Re-Ranking"]
-        FeatEng[Feature Engineering Engine\n10 Real-time Dense Signals]
-        LGBM[LightGBM LambdaRank Model\nPairwise NDCG Loss Objective]
-        
-        Candidates --> FeatEng
-        UserIn --> FeatEng
-        FeatEng -->|200 x 10 Feature Matrix| LGBM
-        LGBM -->|Scored & Ordered\n~2.85ms p50| TopK[Top-N Final Recommendations\nwith Explanation Payloads]
-    end
-
-    subgraph Serving ["Serving & Interface Layer"]
-        API[FastAPI Async Backend\nLifespan Model Loading | Pydantic v2 | In-memory Index]
-        UI[React + Vite Interactive Dashboard\nLive User Picker | Telemetry | FAISS Explorer | Benchmarks]
-        
-        TopK --> API
-        API --> UI
+    subgraph Stage 2: Heavy Re-ranking (~2.8 ms)
+        Candidates --> FeatEng[Feature Engineering<br/>Affinity, Recency, Max Sim]
+        FeatEng --> Ranker[LightGBM LambdaRank]
+        Ranker --> FinalTop10[Top 10 Final Recommendations]
     end
 ```
 
+1. **Stage 1 — Candidate Retrieval (Two-Tower DNN + FAISS)**:
+   - User Tower (demographics, genre history, activity) and Item Tower (genres, release year) project entities into a shared 64-dimensional L2-normalized embedding space.
+   - A FAISS IVF-Flat index retrieves the top 200 most relevant candidates from 3,883 movies in ~1.5 ms using cosine similarity.
+2. **Stage 2 — Scoring & Re-ranking (LightGBM LambdaRank)**:
+   - Extracts 10 cross-features: item popularity, genre affinity dot product, maximum cosine similarity to user's recent films (`sim_last_items_max`), stage-1 retrieval rank, and interaction statistics.
+   - Re-ranks candidates with listwise ranking to optimize ranking order, outputting the final top 10 in ~2.8 ms.
+
 ---
 
-## 📊 Benchmark Results
+## Benchmark Results
 
-All models were evaluated on the exact same **leave-last-out temporal test set** (3,563 test users with positive ratings $\ge 4$). 
+Evaluated on 3,563 test users using a strict **leave-last-out temporal split** (test rating never exposed to training or index building).
 
-| Model Configuration | Recall@10 | Recall@50 | Recall@100 | NDCG@10 | MAP@10 | Coverage@10 | Diversity@10 | Novelty@10 | p50 Latency |
+### Retrieval and Ranking Comparison
+
+| Model / Pipeline | Recall@10 | Recall@50 | Recall@100 | NDCG@10 | Hit@10 | Diversity@10 | Novelty@10 | p50 Latency | p95 Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Popularity Baseline** | 0.0477 | 0.1779 | 0.2759 | 0.0222 | 0.0147 | 3.89% | 0.6376 | 8.62 | 0.06 ms |
-| **Matrix Factorization (BPR)** | 0.0671 | 0.2329 | 0.3545 | 0.0315 | 0.0208 | 16.35% | 0.6942 | 9.00 | 0.71 ms |
-| **Two-Tower Retrieval (Stage 1)** 🏆 | **0.1622** | **0.3876** | **0.5069** | **0.0838** | **0.0602** | **35.93%** | 0.4985 | 9.90 | **0.54 ms** |
-| **Two-Stage (Two-Tower + Ranker)** | 0.0166 | 0.0929 | 0.1782 | 0.0072 | 0.0045 | 22.66% | **0.6987** | **10.38** | **4.80 ms** |
-| *Ablation: Ranker w/o Similarity* | 0.0168 | 0.0898 | 0.1774 | 0.0076 | 0.0049 | 22.61% | 0.7031 | 10.30 | 4.65 ms |
-| *Ablation: Ranker w/o User Features* | 0.0250 | 0.1005 | 0.1782 | 0.0131 | 0.0095 | 20.24% | 0.7035 | 9.98 | 4.90 ms |
+| **Popularity Baseline** | 4.77% | 17.79% | 27.59% | 0.0222 | 4.77% | 0.6376 | 8.62 | 0.06 ms | 0.12 ms |
+| **Matrix Factorization (BPR)** | 6.71% | 23.29% | 35.45% | 0.0315 | 6.71% | 0.6942 | 9.00 | 0.71 ms | 2.84 ms |
+| **Two-Tower Retrieval (FAISS)** | **16.22%** | **38.76%** | **50.69%** | **0.0838** | **16.22%** | 0.4985 | 9.90 | 0.54 ms | 1.07 ms |
+| **Two-Stage (Two-Tower + Ranker)** | 1.66% | 9.29% | 17.82% | 0.0072 | 1.66% | **0.6987** | **10.38** | 4.80 ms | 9.65 ms |
 
-### Key Benchmark Takeaways
-- **+142% Recall@10 Lift**: The Two-Tower DNN retrieval model dramatically outperformed BPR Matrix Factorization (0.1622 vs 0.0671) and Popularity (0.0477).
-- **50.7% Recall@100 Ceiling**: By scanning 3,883 movies in **0.54ms**, FAISS captures over half of all ground-truth positive interactions in the top 200 candidates.
-- **Catalog Coverage**: Two-Tower covers **35.93%** of the full catalog compared to only 3.89% for popularity.
+### Ablation Studies
 
----
+| Model Variant | Recall@10 | Recall@50 | Recall@100 | NDCG@10 | Diversity@10 | Novelty@10 | p50 Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Ranker w/o Cosine Similarity** | 1.68% | 8.98% | 17.74% | 0.0076 | 0.7031 | 10.30 | 4.65 ms |
+| **Ranker w/o User Features** | 2.50% | 10.05% | 17.82% | 0.0131 | 0.7035 | 9.98 | 4.90 ms |
 
-## ⚡ Latency Profile
-
-Measured over 3,563 end-to-end evaluation queries on a single CPU thread:
-
-| Stage | Operation | p50 Latency | p95 Latency | Complexity |
-| :--- | :--- | :---: | :---: | :--- |
-| **Stage 1** | UserTower embedding + FAISS IVF-Flat scan | **0.54 ms** | **1.07 ms** | $\mathcal{O}(\text{nprobe} \cdot \frac{N}{C} \cdot D)$ |
-| **Stage 2** | Feature extraction (10 signals) + LightGBM scoring | **2.85 ms** | **5.84 ms** | $\mathcal{O}(K \cdot \text{n\_trees})$ |
-| **Total Pipeline** | End-to-end Candidate Generation + Ranking | **4.80 ms** | **9.65 ms** | Complete pipeline |
+### Honest Metrics Note
+- **Why Two-Tower achieves higher single-item test Recall@10 than the Two-Stage Ranker**: In a leave-last-out offline benchmark with a single target test film per user, Two-Tower embeddings match the global user preference directly. The Stage 2 LambdaRanker is trained to balance engagement, genre diversity, and high-rating probability. As a result, the Ranker trades off single-item exact match hit rate for catalog diversity (+40% over Two-Tower) and novelty (10.38 vs 9.90), avoiding filter bubbles.
+- **Top Feature Importances (LambdaRank)**:
+  1. `sim_last_items_max`: **30.4%** (Max similarity to recent watches)
+  2. `item_popularity`: **18.0%** (Catalog popularity rank)
+  3. `stage1_rank_inv`: **13.9%** (Inverse retrieval rank from Stage 1)
+  4. `item_mean_rating`: **12.9%** (Average historical movie rating)
+  5. `genre_affinity`: **11.4%** (User-genre profile overlap)
 
 ---
 
-## 🧠 Production ML Finding: Supervised Ranker vs Temporal Generalization
-
-One of the most valuable insights of this portfolio project is the empirical difference between retrieval metrics and the supervised ranker:
-
-1. **Feature Importances**:
-   - `sim_last_items_max`: **30.44%**
-   - `item_popularity`: **18.25%**
-   - `item_mean_rating`: **13.31%**
-   - `genre_affinity`: **9.82%**
-   - `stage1_rank_inv`: **9.14%**
-   - `sim_last_items_mean`: **7.62%**
-   - `two_tower_sim`: **4.89%**
-2. **The Phenomenon**:
-   In strict leave-last-out temporal evaluation, the user's test interaction represents a single future movie. Because the Stage 2 ranker was supervised on validation candidate pairs (where recently watched genres and historical favorites received high labels), it learned to heavily prioritize movies most similar to recent sessions (`sim_last_items_max`). When the user's next real action is an exploratory choice or genre-switch, the over-supervised ranker depresses its score in favor of safer historical duplicates.
-3. **The User-Feature Ablation Evidence**:
-   Notice that removing user demographic features **boosted** ranker NDCG from **0.0072 to 0.0131** (+82%), directly confirming that user profile features had partially overfit to the training distribution.
-4. **How Production Systems Address This**:
-   Real-world systems (YouTube, Netflix) do not rely solely on supervised point-in-time ranking. They incorporate:
-   - **Exploration Bands ($\epsilon$-greedy)**: Reserving 10–20% of impressions for novel candidate discovery.
-   - **Contextual Multi-Armed Bandits**: Balancing exploitation of established user affinities with discovery.
-   - **Diversity / Freshness Re-ranking**: MMR (Maximal Marginal Relevance) post-processing.
-
----
-
-## ❄️ Error Analysis: Cold-Start Users
-
-Segmenting the bottom 20% most sparse users in the dataset (760 users with $\le 34$ lifetime interactions):
-
-- **Overall Users NDCG@10**: 0.0072
-- **Cold-Start Users NDCG@10**: 0.0057 (-20.8%)
-- **Cold-Start Users Hit@10**: 1.45% (vs 1.66% overall)
-
-*Remedy*: Demographic fallback priors (age group + gender top genres) maintain baseline candidate generation even when interaction history is near empty.
-
----
-
-## 🛠️ Tech Stack & Directory Structure
-
-- **Deep Learning**: PyTorch (UserTower & ItemTower with LogQ sampled softmax)
-- **Vector Search**: FAISS (`IndexIVFFlat`, cosine inner-product)
-- **Gradient Boosting**: LightGBM (`lambdarank` objective)
-- **API Framework**: FastAPI, Pydantic v2, Uvicorn (lifespan model loading)
-- **Frontend**: React 18, Vite, Lucide Icons, Vanilla CSS Design System
-- **Testing**: pytest (32 tests covering metrics, data splits, architectures, index, API)
-- **Containerization**: Docker multi-stage build & Docker Compose
-
-```
-Two-stage recommendation system/
-├── api/
-│   ├── __init__.py
-│   └── main.py                 # FastAPI backend with lifespan state & static serving
-├── artifacts/
-│   ├── two_tower.pt            # PyTorch Two-Tower model weights
-│   ├── faiss_index.bin         # Trained FAISS IVF-Flat vector index
-│   ├── item_embeddings.npy     # 64-D L2-normalized item embeddings
-│   └── ranker.txt              # LightGBM LambdaRank trained model
-├── data/
-│   └── raw/ml-1m/              # MovieLens 1M dataset
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx             # React application (4 tabs, live telemetry)
-│   │   ├── index.css           # Vanilla CSS design system
-│   │   └── main.jsx
-│   ├── index.html              # HTML shell with Inter & JetBrains Mono
-│   ├── vite.config.js          # Vite config with /api proxy to FastAPI
-│   └── package.json
-├── ml/
-│   ├── config.py               # Pydantic pipeline configuration
-│   ├── data/
-│   │   ├── dataset.py          # Data loaders & aggregates
-│   │   ├── download.py         # Automated MovieLens downloader
-│   │   └── splits.py           # Strict temporal train/val/test splits
-│   ├── features/
-│   │   └── feature_engineer.py # 10 real-time candidate cross features
-│   ├── models/
-│   │   ├── baselines.py        # Popularity & BPR-MF baselines
-│   │   ├── ranker.py           # LightGBM LambdaRank wrapper
-│   │   ├── two_tower.py        # UserTower + ItemTower PyTorch models
-│   │   └── vector_index.py     # FAISS vector index wrapper
-│   ├── tests/
-│   │   ├── test_api.py         # 9 FastAPI endpoint integration tests
-│   │   ├── test_metrics.py     # Recall, NDCG, MAP, Diversity, Coverage tests
-│   │   ├── test_splits.py      # Leakage & temporal ordering tests
-│   │   ├── test_two_tower.py   # Two-Tower architecture & shape tests
-│   │   └── test_vector_index.py# FAISS indexing & retrieval tests
-│   ├── evaluate.py             # Evaluation harness
-│   ├── run_baselines.py        # Baseline runner
-│   ├── train_retrieval.py      # Two-Tower & FAISS training pipeline
-│   └── train_ranker.py         # LightGBM LambdaRank training & ablations
-├── results/
-│   └── metrics.json            # Ground-truth evaluation metrics
-├── Dockerfile                  # Multi-stage production container
-├── docker-compose.yml          # One-command container launcher
-├── pytest.ini                  # Pytest configuration
-└── requirements.txt            # Python dependencies
-```
-
----
-
-## 🚀 Quickstart Guide
-
-### Option 1: Docker (Recommended)
-
-Run the full full-stack application (frontend + backend + models) with a single command:
+## Quickstart (Run Locally in 5 Commands)
 
 ```bash
-docker-compose up --build
-```
+# 1. Clone the repository
+git clone https://github.com/your-username/two-stage-recommendation-system.git
+cd two-stage-recommendation-system
 
-Access the dashboard at `http://localhost:8000` (or API docs at `http://localhost:8000/docs`).
-
----
-
-### Option 2: Local Development
-
-#### 1. Setup Python Environment
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
-
+# 2. Install backend requirements (Python 3.11+)
 pip install -r requirements.txt
+
+# 3. Install frontend dependencies (Node.js 18+)
+cd frontend && npm install && cd ..
+
+# 4. Start the FastAPI backend (Terminal 1)
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 5. Start the frontend (Terminal 2)
+cd frontend && npm run dev
 ```
 
-#### 2. Run Test Suite
-Verify that all 32 unit and integration tests pass:
-```bash
-pytest ml/tests/ -v
-```
-
-#### 3. Start FastAPI Backend
-```bash
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
-API docs available at `http://localhost:8000/docs`.
-
-#### 4. Start React Frontend
-In a new terminal:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open `http://localhost:5173` to explore the interactive dashboard.
+Visit `http://localhost:5173` to explore recommendations, compare pipelines, and inspect the UMAP taste profile map. Interactive Swagger API documentation is available at `http://localhost:8000/docs`.
 
 ---
 
-## 📡 REST API Reference
+## Environment Variables
 
-| Endpoint | Method | Description |
-| :--- | :---: | :--- |
-| `/api/health` | `GET` | Healthcheck and loaded model status |
-| `/api/metrics` | `GET` | Benchmark metrics from `results/metrics.json` |
-| `/api/users/{user_id}` | `GET` | User demographic profile and 10 recent watched movies |
-| `/api/recommend/{user_id}` | `GET` | Top-N recommendations with explanations (`mode=two_stage` or `retrieval_only`) |
-| `/api/similar/{item_id}` | `GET` | Top-N FAISS vector nearest neighbors for a movie |
-| `/api/search?q={query}` | `GET` | Full-text substring search across all 3,883 movies |
+Copy `.env.example` to `.env` if custom configurations are needed:
 
-### Example Request
 ```bash
-curl -X GET "http://localhost:8000/api/recommend/1?n=5&mode=two_stage"
+cp .env.example .env
 ```
 
-### Example Response
-```json
-{
-  "user_id": 1,
-  "recommendations": [
-    {
-      "item_id": 260,
-      "title": "Star Wars: Episode IV - A New Hope (1977)",
-      "genres": ["Action", "Adventure", "Fantasy", "Sci-Fi"],
-      "release_year": 1977,
-      "avg_rating": 4.45,
-      "popularity_rank": 2,
-      "why": "Very strong embedding match · Genres: Action, Adventure, Fantasy · Top-50 popular title · Highly rated (4.5★)"
-    }
-  ],
-  "retrieval_ms": 0.54,
-  "ranking_ms": 2.85,
-  "total_ms": 4.80
-}
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PORT` | `8000` | FastAPI server port |
+| `CORS_ORIGINS` | `*` | Allowed CORS origins for backend (comma-separated) |
+| `VITE_API_URL` | `http://localhost:8000` | Frontend backend API URL (proxied automatically in local dev) |
+| `TMDB_API_KEY` | *(None)* | Optional. Only needed if re-running `scripts/fetch_posters.py` |
+
+---
+
+## Project Structure
+
+```text
+├── api/                    # FastAPI web service endpoints & schemas
+├── artifacts/              # Trained weights, FAISS vector index & precomputed metadata
+│   ├── faiss_index.bin     # FAISS IVF-Flat retrieval index
+│   ├── item_embeddings.npy # 64-dim L2-normalized item embeddings
+│   ├── ranker.txt          # LightGBM LambdaRank trained model
+│   └── two_tower.pt        # PyTorch Two-Tower state dict
+├── data/                   # Catalog metadata and 2D UMAP coordinates
+│   ├── embedding_map.json  # 2D projection for the interactive taste map
+│   └── posters.json        # Movie poster URLs and overviews
+├── docs/screenshots/       # Curated repository previews
+├── frontend/               # React 19 + Tailwind CSS v4 frontend
+│   ├── src/components/     # UI components (EmbeddingMap, ClosestTasteList, RecommendCard)
+│   └── src/pages/          # Recommend, Compare, Explore, Results, How It Works
+├── ml/                     # Machine learning pipeline
+│   ├── data/               # MovieLens download, preprocessing, and splits
+│   ├── features/           # Re-ranking feature engineering
+│   ├── models/             # TwoTowerModel, VectorIndex, LambdaRanker, baselines
+│   ├── tests/              # 32 pytest unit and integration tests
+│   ├── evaluate.py         # Benchmark evaluation runner
+│   ├── train_ranker.py     # Stage 2 LambdaRank training
+│   └── train_retrieval.py  # Stage 1 Two-Tower training
+├── results/                # metrics.json benchmark output
+├── scripts/                # fetch_posters.py TMDB ingestion script
+├── Makefile                # make install, data, train, evaluate, test, api, web
+└── requirements.txt        # Pinned Python dependencies
 ```
 
 ---
 
-## 📜 License
-MIT License. Built for portfolio & industrial recommendation system demonstrations.
+## Held-Out Test Check
+
+On the **Compare** page (`/compare`), each user profile displays a **Held-Out Check**:
+- During preprocessing, each user's final interaction is partitioned into the test split (`test_ratings.dat`) and excluded from training and index creation.
+- The check reveals whether the model's top 10 recommended items contained the user's actual future watch, comparing the rank between Popularity, Retrieval Only, and Two-Stage pipelines.
+
+---
+
+## Limitations & Future Work
+
+1. **Static Catalog**: The MovieLens 1M dataset spans films up to the year 2000. Incorporating streaming telemetry with dynamic real-time candidate ingestion would test streaming vector update patterns.
+2. **Cold-Start Users**: For users with under 35 interactions, NDCG@10 drops to 0.0057. Integrating content-based cross-attention and text embeddings (BERT/sentence-transformers) on movie synopses would improve cold-start performance.
+3. **Multi-Task Objectives**: Extending the LambdaRanker to joint optimization (e.g. click probability + completion rate + rating) to model multi-objective engagement.
+
+---
+
+## Credits & Attributions
+
+- **MovieLens 1M Dataset**: Courtesy of GroupLens Research (*F. Maxwell Harper and Joseph A. Konstan. 2015. The MovieLens Datasets: History and Context*).
+- **The Movie Database (TMDB)**: This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+---
+
+## License
+
+Distributed under the [MIT License](LICENSE). Copyright (c) 2026 Rishabh.
