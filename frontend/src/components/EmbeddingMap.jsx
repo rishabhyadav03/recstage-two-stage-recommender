@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { RefreshCw, Film } from 'lucide-react';
+import { apiUrl } from '../utils/api';
 
 export const GENRE_GROUPS = [
   {
@@ -134,7 +135,7 @@ export default function EmbeddingMap({
     setMapLoading(true);
     setMapError(null);
     try {
-      const res = await fetch('/api/map');
+      const res = await fetch(apiUrl('/api/map'));
       if (!res.ok) {
         if (res.status === 503) {
           throw new Error('Embedding map not built yet. Run `python ml/build_embedding_map.py` to generate it.');
@@ -160,7 +161,7 @@ export default function EmbeddingMap({
     if (!uid) return;
     setUserLoading(true);
     try {
-      const res = await fetch(`/api/map/user/${uid}`);
+      const res = await fetch(apiUrl(`/api/map/user/${uid}`));
       if (!res.ok) {
         throw new Error(`Failed to load user state (status ${res.status})`);
       }

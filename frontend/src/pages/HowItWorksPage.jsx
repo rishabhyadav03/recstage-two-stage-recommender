@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { formatLatency } from '../utils/formatters';
+import { apiUrl } from '../utils/api';
 
 export default function HowItWorksPage() {
   const [metrics, setMetrics] = useState(null);
 
   useEffect(() => {
-    fetch('/api/metrics')
+    fetch(apiUrl('/api/metrics'))
       .then((r) => r.json())
       .then((d) => setMetrics(d))
       .catch((e) => console.error("Could not fetch metrics:", e));

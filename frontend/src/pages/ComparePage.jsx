@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Dices, Sparkles, AlertCircle, RefreshCw, Film } from 'lucide-react';
 import UserCombobox from '../components/UserCombobox';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { apiUrl } from '../utils/api';
 
 function cleanTitle(raw) {
   if (!raw) return '';
@@ -37,7 +38,7 @@ export default function ComparePage() {
     let isMounted = true;
     async function loadWinningUsers() {
       try {
-        const res = await fetch('/api/compare/winning-users');
+        const res = await fetch(apiUrl('/api/compare/winning-users'));
         if (res.ok) {
           const list = await res.json();
           if (isMounted && Array.isArray(list) && list.length > 0) {
@@ -57,7 +58,7 @@ export default function ComparePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/compare/${uid}?k=${count}`);
+      const res = await fetch(apiUrl(`/api/compare/${uid}?k=${count}`));
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.detail || `Server returned error ${res.status}`);

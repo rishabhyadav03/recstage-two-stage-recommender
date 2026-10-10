@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, X, Clock, ArrowLeft } from 'lucide-react';
 import { formatRating } from '../utils/formatters';
+import { apiUrl } from '../utils/api';
 
 function cleanMovieTitle(title) {
   if (!title) return '';
@@ -35,7 +36,7 @@ export default function ExplorePage() {
     setSimilarLoading(true);
 
     try {
-      const res = await fetch(`/api/similar/${movie.item_id}?n=10`);
+      const res = await fetch(apiUrl(`/api/similar/${movie.item_id}?n=10`));
       if (res.ok) {
         const data = await res.json();
         // Enrich selected movie if data has more details
@@ -65,7 +66,7 @@ export default function ExplorePage() {
 
   const loadItemById = useCallback(async (itemId) => {
     try {
-      const res = await fetch(`/api/similar/${itemId}?n=10`);
+      const res = await fetch(apiUrl(`/api/similar/${itemId}?n=10`));
       if (res.ok) {
         const data = await res.json();
         setSelectedMovie({
@@ -95,7 +96,7 @@ export default function ExplorePage() {
     }
     setSearchLoading(true);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=15`);
+      const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}&limit=15`));
       if (res.ok) {
         const data = await res.json();
         const searchResults = data?.results ?? [];

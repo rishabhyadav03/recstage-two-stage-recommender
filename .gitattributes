@@ -1,0 +1,6 @@
+# Enforce LF line endings for LightGBM model text files so Git on Windows does not convert them to CRLF
+artifacts/ranker.txt text eol=lf
+*.pt binary
+*.bin binary
+*.npy binary
+*.json text eol=lf

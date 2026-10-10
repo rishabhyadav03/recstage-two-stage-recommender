@@ -10,6 +10,7 @@ import EmbeddingMap from '../components/EmbeddingMap';
 import ClosestTasteList from '../components/ClosestTasteList';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { formatLatency } from '../utils/formatters';
+import { apiUrl } from '../utils/api';
 
 export default function RecommendPage() {
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ export default function RecommendPage() {
   const fetchUserProfile = useCallback(async (id) => {
     setProfileLoading(true);
     try {
-      const res = await fetch(`/api/users/${id}`);
+      const res = await fetch(apiUrl(`/api/users/${id}`));
       if (res.ok) {
         const data = await res.json();
         setUserProfile(data);
@@ -56,7 +57,7 @@ export default function RecommendPage() {
   const fetchMapUserState = useCallback(async (id) => {
     setMapUserLoading(true);
     try {
-      const res = await fetch(`/api/map/user/${id}`);
+      const res = await fetch(apiUrl(`/api/map/user/${id}`));
       if (res.ok) {
         const data = await res.json();
         setMapUserState(data);
@@ -72,7 +73,7 @@ export default function RecommendPage() {
     setRecsLoading(true);
     setRecsError(null);
     try {
-      const res = await fetch(`/api/recommend/${id}?n=${n}&mode=${m}`);
+      const res = await fetch(apiUrl(`/api/recommend/${id}?n=${n}&mode=${m}`));
       if (res.ok) {
         const data = await res.json();
         setRecsData(data);
