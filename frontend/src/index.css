@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-text-main: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-border: var(--accent-border);
+
+  --font-heading: 'Fraunces', Georgia, serif;
+  --font-serif: 'Fraunces', Georgia, serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --shadow-soft: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+  --shadow-popover: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+}
+
+:root {
+  /* Warm Editorial Light Theme (Default) */
+  --bg: #F5F1EA;
+  --surface: #FBF9F5;
+  --surface-2: #EFEAE0;
+  --surface-3: #E6DFD2;
+  --border: #E3DCD0;
+  --border-subtle: #EDE7DC;
+  --text: #1B1815;
+  --text-muted: #6F675E;
+  --accent: #D94F30;
+  --accent-hover: #C24125;
+  --accent-subtle: rgba(217, 79, 48, 0.08);
+  --accent-border: rgba(217, 79, 48, 0.25);
+}
+
+.dark {
+  /* Warm Charcoal Dark Theme */
+  --bg: #131110;
+  --surface: #1B1917;
+  --surface-2: #24211E;
+  --surface-3: #2F2B26;
+  --border: #2A2622;
+  --border-subtle: #201D1A;
+  --text: #EDE7DD;
+  --text-muted: #9A9187;
+  --accent: #E8664A;
+  --accent-hover: #EF785F;
+  --accent-subtle: rgba(232, 102, 74, 0.12);
+  --accent-border: rgba(232, 102, 74, 0.28);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    transition-property: background-color, border-color, color;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    background-color: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, .font-heading {
+    font-family: var(--font-heading);
+    letter-spacing: -0.02em;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Accessible focus ring */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Typography utilities */
+.font-numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text clamp */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
