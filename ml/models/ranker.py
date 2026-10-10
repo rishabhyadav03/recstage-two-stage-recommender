@@ -34,6 +34,9 @@ class LambdaRanker:
         y: np.ndarray,
         group: List[int],
         feature_names: Optional[List[str]] = None,
+        eval_set: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        eval_group: Optional[List[int]] = None,
+        early_stopping_rounds: Optional[int] = None,
     ) -> "LambdaRanker":
         """
         Train LambdaRank model.
@@ -59,7 +62,7 @@ class LambdaRanker:
         params = {
             "objective": "lambdarank",
             "metric": "ndcg",
-            "ndcg_eval_at": [10],
+            "eval_at": [10],
             "learning_rate": self.learning_rate,
             "num_leaves": self.num_leaves,
             "min_child_samples": self.min_child_samples,
@@ -67,10 +70,34 @@ class LambdaRanker:
             "verbosity": -1,
         }
 
+        valid_sets = []
+        valid_names = []
+        callbacks = []
+
+        if eval_set is not None and eval_group is not None:
+            X_val, y_val = eval_set
+            val_data = lgb.Dataset(
+                X_val,
+                label=y_val,
+                group=eval_group,
+                feature_name=self.feature_names,
+                reference=train_data,
+                free_raw_data=False,
+            )
+            valid_sets.append(val_data)
+            valid_names.append("val")
+
+            if early_stopping_rounds is not None and early_stopping_rounds > 0:
+                callbacks.append(lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False))
+                callbacks.append(lgb.log_evaluation(period=0))
+
         self.model = lgb.train(
             params,
             train_data,
             num_boost_round=self.n_estimators,
+            valid_sets=valid_sets if valid_sets else None,
+            valid_names=valid_names if valid_names else None,
+            callbacks=callbacks if callbacks else None,
         )
         logger.info("LambdaRanker training complete.")
         return self
