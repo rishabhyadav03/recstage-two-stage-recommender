@@ -5,6 +5,7 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 
 import ErrorBoundary from './components/ErrorBoundary';
+import ServerWakeBanner from './components/ServerWakeBanner';
 
 import RecommendPage from './pages/RecommendPage';
 import ComparePage from './pages/ComparePage';
@@ -18,6 +19,7 @@ export default function App() {
       <BrowserRouter>
         <div className="min-h-screen flex flex-col bg-background text-text-main transition-colors duration-150 overflow-x-clip">
           <Header />
+          <ServerWakeBanner />
           
           <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-10 pb-8 sm:pb-10">
             <ErrorBoundary>
