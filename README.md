@@ -82,27 +82,73 @@ Evaluated on 3,563 test users using a strict **leave-last-out temporal split** (
 
 ---
 
-## Quickstart (Run Locally in 5 Commands)
+## Run it locally
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/two-stage-recommendation-system.git
-cd two-stage-recommendation-system
+### One-Command Startup
 
-# 2. Install backend requirements (Python 3.11+)
-pip install -r requirements.txt
+Start both backend and frontend simultaneously with a single command:
 
-# 3. Install frontend dependencies (Node.js 18+)
-cd frontend && npm install && cd ..
-
-# 4. Start the FastAPI backend (Terminal 1)
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 5. Start the frontend (Terminal 2)
-cd frontend && npm run dev
+**On Windows (PowerShell):**
+```powershell
+.\scripts\dev.ps1
 ```
 
-Visit `http://localhost:5173` to explore recommendations, compare pipelines, and inspect the UMAP taste profile map. Interactive Swagger API documentation is available at `http://localhost:8000/docs`.
+**On macOS / Linux:**
+```bash
+make dev
+```
+
+Both dev servers will spin up and display:
+- **Frontend UI**: [http://localhost:5173](http://localhost:5173)
+- **Backend API**: [http://127.0.0.1:8000](http://127.0.0.1:8000) (Interactive Swagger Docs at `http://127.0.0.1:8000/docs`)
+
+### Manual Startup (Separate Terminals)
+
+If you prefer starting services individually:
+
+1. **Backend (Terminal 1)**:
+   ```bash
+   uvicorn api.main:app --port 8000
+   ```
+2. **Frontend (Terminal 2)**:
+   ```bash
+   cd frontend && npm run dev
+   ```
+
+### Troubleshooting
+
+- **Server returned 502 Bad Gateway / Failed to reach recommendation API**:
+  The Vite frontend proxies `/api/*` requests to the backend at `http://127.0.0.1:8000`. A 502 error indicates the backend is not running or crashed during startup. Confirm the backend is running and healthy:
+  ```bash
+  curl http://127.0.0.1:8000/api/health
+  ```
+  *(Note: Vite's proxy target is set to IPv4 `http://127.0.0.1:8000` rather than `localhost` to avoid Node 18+ resolving `localhost` to IPv6 `::1` while uvicorn listens on IPv4).*
+
+- **Vite Port 5174 Fallback (`strictPort`)**:
+  If another process or a previous orphaned Vite server is already using port 5173, Vite by default silently switches to 5174. In `frontend/vite.config.js`, `strictPort: true` is configured so Vite will fail explicitly rather than quietly binding to 5174. To find and free port 5173:
+  ```powershell
+  # Windows: find PID on 5173 and terminate
+  netstat -ano | findstr :5173
+  tasklist /FI "PID eq <pid>"
+  taskkill /PID <pid> /F
+  ```
+  On macOS / Linux:
+  ```bash
+  lsof -i :5173
+  kill -9 <pid>
+  ```
+
+- **WinError 10013 / Port 8000 in use or reserved**:
+  On Windows, port 8000 may conflict with Windows Hyper-V, WSL reserved port exclusions, or another running service:
+  ```powershell
+  netstat -ano | findstr :8000
+  tasklist /FI "PID eq <pid>"
+  ```
+  If port 8000 is occupied or reserved by the system, run the backend on port 8001 instead:
+  ```powershell
+  uvicorn api.main:app --port 8001
+  ```
+  And update `frontend/vite.config.js` proxy target to `'http://127.0.0.1:8001'` (or set `VITE_API_URL=http://127.0.0.1:8001` in `frontend/.env`).
 
 ---
 
@@ -118,7 +164,7 @@ cp .env.example .env
 | :--- | :--- | :--- |
 | `PORT` | `8000` | FastAPI server port |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins for backend (comma-separated) |
-| `VITE_API_URL` | `http://localhost:8000` | Frontend backend API URL (proxied automatically in local dev) |
+| `VITE_API_URL` | *(empty)* | Frontend backend API URL (empty in local dev so Vite dev proxy routes `/api`) |
 | `TMDB_API_KEY` | *(None)* | Optional. Only needed if re-running `scripts/fetch_posters.py` |
 
 ---

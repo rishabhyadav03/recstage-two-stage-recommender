@@ -1,9 +1,10 @@
-.PHONY: help install data posters train evaluate map api web test clean
+.PHONY: help dev install data posters train evaluate map api web test clean
 
 help:
 	@echo "RecStage: Two-Stage Recommendation System"
 	@echo "=========================================="
 	@echo "Available commands:"
+	@echo "  make dev       Run backend and frontend together (one-command startup)"
 	@echo "  make install   Install Python and Node.js dependencies"
 	@echo "  make data      Download the MovieLens-1M dataset"
 	@echo "  make train     Train Two-Tower retrieval and LightGBM LambdaRank models"
@@ -14,6 +15,12 @@ help:
 	@echo "  make web       Run Vite frontend dev server on http://localhost:5173"
 	@echo "  make test      Run backend test suite with pytest"
 	@echo "  make clean     Remove build caches and temporary files"
+
+dev:
+	@echo "Starting RecStage development servers..."
+	@echo "  Backend API:  http://127.0.0.1:8000 (docs: http://127.0.0.1:8000/docs)"
+	@echo "  Frontend UI:  http://localhost:5173"
+	@trap 'kill 0' INT TERM EXIT; uvicorn api.main:app --port 8000 & (cd frontend && npm run dev)
 
 install:
 	python -m pip install --upgrade pip
