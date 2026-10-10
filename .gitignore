@@ -1,0 +1,41 @@
+# Environment & secrets
+.env
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Node & frontend builds
+node_modules/
+dist/
+build/
+.vite/
+
+# Logs & temp files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Raw dataset (downloaded via ml/data/download.py; not redistributed)
+data/raw/
+
+# Screenshots & scratch files in dev folders (docs/screenshots/ is tracked)
+artifacts/*.png
+artifacts/*.jpg
+artifacts/*.jpeg
+artifacts/*.gif
+recommend_*.png
+scratch/

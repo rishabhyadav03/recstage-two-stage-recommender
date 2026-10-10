@@ -1,0 +1,35 @@
+seed: 42
+
+data:
+  dataset_name: "ml-1m" # Supports "ml-1m" or "ml-25m"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  positive_rating_threshold: 4.0
+  min_user_interactions: 5
+  last_n_watched: 5
+
+retrieval:
+  embedding_dim: 64
+  user_hidden_dims: [128, 64]
+  item_hidden_dims: [128, 64]
+  learning_rate: 0.001
+  batch_size: 1024
+  epochs: 5
+  temperature: 0.07
+  weight_decay: 0.00001
+  logq_correction: true
+  top_k_candidates: 200
+  index_type: "IVF_FLAT" # or HNSW, FLAT
+
+ranker:
+  model_type: "lightgbm" # LambdaRank
+  n_estimators: 150
+  learning_rate: 0.05
+  num_leaves: 31
+  min_child_samples: 20
+  negative_ratio: 10 # Hard negatives sampled per positive candidate from stage 1
+
+eval:
+  ks: [10, 50, 100]
+  ranking_k: 10
+  results_dir: "results"
