@@ -154,6 +154,53 @@ If you prefer starting services individually:
 
 ---
 
+## Deployment
+
+The application is architected for zero-cost cloud deployment: the FastAPI backend runs in a Docker container on **Hugging Face Spaces** (free CPU tier), and the React single-page application deploys on **Vercel**.
+
+### Backend (Hugging Face Spaces)
+The backend container is built from `Dockerfile.hf` (based on `python:3.11-slim` with PyTorch CPU wheel and LightGBM).
+
+1. Create a new Space on [Hugging Face](https://huggingface.co/new-space) with the **Docker** SDK (Blank template, free CPU hardware).
+2. Run the deployment helper to stage and inspect the deployment payload:
+   ```bash
+   # Linux/macOS
+   ./scripts/deploy_hf.sh https://huggingface.co/spaces/<username>/<space-name>
+
+   # Windows PowerShell
+   .\scripts\deploy_hf.ps1 https://huggingface.co/spaces/<username>/<space-name>
+   ```
+3. Push to your Space when prompted:
+   ```bash
+   git push origin main
+   ```
+4. **Free-Tier Behavior**: Hugging Face Spaces on the free tier sleep after 48 hours of inactivity. When a request arrives while sleeping, the container cold-starts, which takes approximately 45–60 seconds. The frontend includes an automatic retry handler that displays a friendly wake-up status banner during cold boots.
+
+#### Backend Environment Variables (Hugging Face Space Settings)
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `CORS_ORIGINS` | `*` | Comma-separated list of allowed frontend origins (e.g. `https://your-app.vercel.app`) |
+| `BUILD_SHA` | *(None)* | Optional git short SHA passed to `/api/health` |
+
+### Frontend (Vercel)
+The React application deploys as a static single-page application with SPA client-side routing via `frontend/vercel.json`.
+
+1. Import the repository in [Vercel](https://vercel.com/new).
+2. Configure project settings:
+   - **Root Directory**: `frontend`
+   - **Framework Preset**: Vite
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+3. Set the environment variable in Vercel Project Settings:
+   - `VITE_API_URL`: Your Hugging Face Space URL (e.g. `https://<username>-<space-name>.hf.space`, without trailing slash).
+
+#### Frontend Environment Variables
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `VITE_API_URL` | *(empty)* | Base URL of the backend API (e.g. `https://<space-name>.hf.space`). Leave empty for local development to use Vite proxy. |
+
+---
+
 ## Environment Variables
 
 Copy `.env.example` to `.env` if custom configurations are needed:
