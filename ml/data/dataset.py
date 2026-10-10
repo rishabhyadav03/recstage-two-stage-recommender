@@ -313,3 +313,31 @@ class MovieLensData:
     @property
     def num_items(self) -> int:
         return len(self.item_to_idx)
+
+    def save_cache(self, path: Path | str, runtime_only: bool = True) -> None:
+        """Serialize processed MovieLensData to disk for fast startup without raw data."""
+        import pickle
+        import copy
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        obj_to_save = self
+        if runtime_only:
+            obj_to_save = copy.copy(self)
+            obj_to_save.train_df = None
+            obj_to_save.ratings_df = None
+            obj_to_save.val_df = None
+            obj_to_save.users_df = None
+            obj_to_save.movies_df = None
+        with open(p, "wb") as f:
+            pickle.dump(obj_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+        logger.info(f"Saved processed dataset cache to {p}")
+
+    @classmethod
+    def load_cache(cls, path: Path | str) -> "MovieLensData":
+        """Load preprocessed MovieLensData from disk cache."""
+        import pickle
+        p = Path(path)
+        with open(p, "rb") as f:
+            data = pickle.load(f)
+        logger.info(f"Loaded processed dataset cache from {p} ({data.num_users} users, {data.num_items} items)")
+        return data

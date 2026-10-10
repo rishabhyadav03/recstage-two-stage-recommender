@@ -1,0 +1,38 @@
+FROM python:3.11-slim
+
+# Install system dependencies (libgomp1 required for LightGBM OpenMP)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up non-root user (uid 1000 per Hugging Face Spaces specification)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /home/user/app
+
+# Install dependencies: PyTorch CPU wheel first (~180MB vs 2GB CUDA), then requirements-deploy.txt
+COPY --chown=user:user requirements-deploy.txt .
+RUN pip install --no-cache-dir torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements-deploy.txt
+
+# Copy only runtime code, configs, artifacts and metadata (excluding dev/test files)
+COPY --chown=user:user api/ ./api/
+COPY --chown=user:user ml/configs/ ./ml/configs/
+COPY --chown=user:user ml/data/ ./ml/data/
+COPY --chown=user:user ml/models/ ./ml/models/
+COPY --chown=user:user ml/features/ ./ml/features/
+COPY --chown=user:user ml/config.py ./ml/config.py
+COPY --chown=user:user ml/evaluate.py ./ml/evaluate.py
+COPY --chown=user:user artifacts/ ./artifacts/
+COPY --chown=user:user data/embedding_map.json ./data/embedding_map.json
+COPY --chown=user:user data/posters.json ./data/posters.json
+COPY --chown=user:user results/metrics.json ./results/metrics.json
+
+# Default Hugging Face Spaces port
+EXPOSE 7860
+
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]

@@ -11,6 +11,7 @@ Endpoints:
 """
 import json
 import logging
+import os
 import re
 import time
 from contextlib import asynccontextmanager
@@ -19,7 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -40,6 +42,8 @@ logger = logging.getLogger(__name__)
 class HealthResponse(BaseModel):
     status: str
     artifacts_loaded: bool
+    models_loaded: Dict[str, bool]
+    version: str
     num_users: int
     num_items: int
 
@@ -161,11 +165,14 @@ _embedding_map: Optional[List[Dict[str, Any]]] = None
 _movie_id_to_xy: Dict[int, Tuple[float, float]] = {}
 _movie_id_to_group: Dict[int, str] = {}
 
-ARTIFACTS_DIR = Path("artifacts")
-RESULTS_DIR = Path("results")
-POSTERS_FILE = Path("data/posters.json")
+BASE_DIR = Path(__file__).resolve().parent.parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
+DATA_DIR = BASE_DIR / "data"
+RESULTS_DIR = BASE_DIR / "results"
+POSTERS_FILE = DATA_DIR / "posters.json"
 WINNERS_FILE = ARTIFACTS_DIR / "winning_users.json"
-EMBEDDING_MAP_FILE = Path("data/embedding_map.json")
+EMBEDDING_MAP_FILE = DATA_DIR / "embedding_map.json"
+DATASET_CACHE_FILE = ARTIFACTS_DIR / "dataset_cache.pkl"
 
 GENRE_NAMES = [
     "Action", "Adventure", "Animation", "Children's", "Comedy", "Crime",
@@ -180,15 +187,21 @@ GENRE_NAMES = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _cfg, _data, _model, _index, _ranker, _feature_eng, _item_embeddings, _popularity_rank, _posters, _winning_users, _embedding_map_raw, _embedding_map, _movie_id_to_xy, _movie_id_to_group
+    t0 = time.perf_counter()
     logger.info("Loading pipeline config and data...")
     _cfg = PipelineConfig.load()
 
-    _data = MovieLensData(
-        dataset_name=_cfg.data.dataset_name,
-        raw_dir=_cfg.data.raw_dir,
-        min_user_interactions=_cfg.data.min_user_interactions,
-        positive_rating_threshold=_cfg.data.positive_rating_threshold,
-    ).load_and_process()
+    if DATASET_CACHE_FILE.exists():
+        logger.info(f"Loading cached dataset from {DATASET_CACHE_FILE}...")
+        _data = MovieLensData.load_cache(DATASET_CACHE_FILE)
+    else:
+        logger.info("Loading and processing raw dataset...")
+        _data = MovieLensData(
+            dataset_name=_cfg.data.dataset_name,
+            raw_dir=str(DATA_DIR / "raw"),
+            min_user_interactions=_cfg.data.min_user_interactions,
+            positive_rating_threshold=_cfg.data.positive_rating_threshold,
+        ).load_and_process()
 
     # Load posters if present
     if POSTERS_FILE.exists():
@@ -270,8 +283,9 @@ async def lifespan(app: FastAPI):
     _popularity_rank = np.empty_like(rank_order)
     _popularity_rank[rank_order] = np.arange(1, len(rank_order) + 1)
 
+    load_time = time.perf_counter() - t0
     logger.info(
-        f"All models loaded. {_data.num_users} users, {_data.num_items} items."
+        f"All models loaded in {load_time:.2f}s: {_data.num_users} users, {_data.num_items} items."
     )
     yield
 
@@ -279,7 +293,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Two-Stage Recommendation System API",
     description=(
-        "Portfolio project demonstrating a production-grade two-stage recommendation "
+        "Portfolio project demonstrating an end-to-end two-stage recommendation "
         "system: Two-Tower DNN retrieval (FAISS) + LightGBM LambdaRank re-ranking."
     ),
     version="1.0.0",
@@ -288,13 +302,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins_raw = os.environ.get("CORS_ORIGINS", "*").strip()
+if cors_origins_raw == "*" or not cors_origins_raw:
+    cors_origins = ["*"]
+else:
+    cors_origins = [orig.strip() for orig in cors_origins_raw.split(",") if orig.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    logger.error(f"Internal server error handling {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # ---------------------------------------------------------------------------
@@ -428,10 +456,18 @@ def _item_card(i_idx: int, u_emb: Optional[np.ndarray] = None, rank: int = 0, u_
 @app.get("/api/health", response_model=HealthResponse, tags=["System"])
 def health():
     """Liveness check — returns OK when all models are loaded."""
-    loaded = all(x is not None for x in [_model, _index, _ranker])
+    models_status = {
+        "two_tower": _model is not None,
+        "faiss_index": _index is not None,
+        "ranker": _ranker is not None,
+        "dataset": _data is not None,
+    }
+    loaded = all(models_status.values())
     return HealthResponse(
         status="ok" if loaded else "loading",
         artifacts_loaded=loaded,
+        models_loaded=models_status,
+        version=os.environ.get("BUILD_SHA", "dev"),
         num_users=_data.num_users if _data else 0,
         num_items=_data.num_items if _data else 0,
     )
@@ -450,7 +486,7 @@ def get_metrics():
 @app.get("/api/users/{user_id}", response_model=UserProfile, tags=["Users"])
 def get_user(user_id: int):
     """Return user profile and last-10 watch history."""
-    if user_id not in _data.user_to_idx:
+    if _data is None or user_id <= 0 or user_id not in _data.user_to_idx:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
     u_idx = _data.user_to_idx[user_id]
     u_meta = _data.user_meta[u_idx]
@@ -499,7 +535,8 @@ def get_user(user_id: int):
 @app.get("/api/recommend/{user_id}", response_model=RecommendResponse, tags=["Recommendations"])
 def recommend(
     user_id: int,
-    n: int = Query(default=10, ge=1, le=50, description="Number of recommendations"),
+    n: Optional[int] = Query(default=None, ge=1, le=50, description="Number of recommendations"),
+    k: Optional[int] = Query(default=None, ge=1, le=50, description="Number of recommendations (alias for n)"),
     mode: str = Query(default="two_stage", enum=["two_stage", "retrieval_only"], description="Pipeline mode"),
 ):
     """
@@ -508,8 +545,9 @@ def recommend(
     Stage 2: LightGBM LambdaRank re-ranking to top-N.
     Includes editorial explanation ('why') for each result.
     """
-    if user_id not in _data.user_to_idx:
+    if _data is None or user_id <= 0 or user_id not in _data.user_to_idx:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    count = min(50, max(1, k if k is not None else (n if n is not None else 10)))
     u_idx = _data.user_to_idx[user_id]
     exclude = set(_data.user_history_i_idx.get(u_idx, []))
 
@@ -523,14 +561,14 @@ def recommend(
     retrieval_ms = round((t1 - t0) * 1000, 2)
 
     if mode == "retrieval_only" or _ranker is None or _ranker.model is None:
-        top_items = cands[:n]
+        top_items = cands[:count]
         ranking_ms = 0.0
     else:
         # Stage 2: Ranking
         t2 = time.perf_counter()
         feats = _feature_eng.extract_features_for_user_candidates(u_idx, u_emb, cands)
         scores = _ranker.predict(feats)
-        top_indices = np.argsort(-scores)[:n]
+        top_indices = np.argsort(-scores)[:count]
         top_items = [cands[i] for i in top_indices]
         t3 = time.perf_counter()
         ranking_ms = round((t3 - t2) * 1000, 2)
@@ -550,18 +588,20 @@ def recommend(
 @app.get("/api/similar/{item_id}", response_model=SimilarResponse, tags=["Items"])
 def similar_items(
     item_id: int,
-    n: int = Query(default=10, ge=1, le=50),
+    n: Optional[int] = Query(default=None, ge=1, le=50),
+    k: Optional[int] = Query(default=None, ge=1, le=50),
 ):
     """Return top-N FAISS nearest-neighbour items for a given item."""
-    if item_id not in _data.item_to_idx:
+    if _data is None or item_id <= 0 or item_id not in _data.item_to_idx:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+    count = min(50, max(1, k if k is not None else (n if n is not None else 10)))
     i_idx = _data.item_to_idx[item_id]
 
     t0 = time.perf_counter()
     q_emb = _item_embeddings[i_idx]
-    _, indices = _index.search(q_emb, k=n + 1)
+    _, indices = _index.search(q_emb, k=count + 1)
     # Exclude the query item itself
-    sim_idxs = [int(j) for j in indices if int(j) != i_idx][:n]
+    sim_idxs = [int(j) for j in indices if int(j) != i_idx][:count]
     query_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     similar = [_item_card(j) for j in sim_idxs]
@@ -704,8 +744,9 @@ def compare(
     3. Two-Stage (Two-Tower FAISS retrieval -> LambdaRank re-ranking)
     Also returns held-out movie evaluation from the leave-last-out test split (strictly for display).
     """
-    if user_id not in _data.user_to_idx:
+    if _data is None or user_id <= 0 or user_id not in _data.user_to_idx:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    k = min(50, max(1, k))
     u_idx = _data.user_to_idx[user_id]
     exclude = set(_data.user_history_i_idx.get(u_idx, []))
 
@@ -863,8 +904,9 @@ def get_user_map_state(user_id: int, k: int = Query(default=10, ge=1, le=50)):
             status_code=503,
             detail="Embedding map not built yet. Please run `python ml/build_embedding_map.py` to generate data/embedding_map.json.",
         )
-    if user_id not in _data.user_to_idx:
+    if _data is None or user_id <= 0 or user_id not in _data.user_to_idx:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    k = min(50, max(1, k))
 
     u_idx = _data.user_to_idx[user_id]
     exclude = set(_data.user_history_i_idx.get(u_idx, []))
