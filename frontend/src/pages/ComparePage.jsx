@@ -138,15 +138,18 @@ export default function ComparePage() {
               inline={true}
             />
 
-            <button
-              type="button"
-              onClick={handleTryWinningUser}
-              className="h-8 px-2.5 bg-accent-subtle hover:bg-accent-subtle/80 border border-accent/30 rounded-lg text-xs font-semibold text-accent transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
-              title="Pick a user where Two-stage ranks their next watched film higher than Retrieval"
-            >
-              <Sparkles size={13} className="text-accent shrink-0" />
-              <span>Try a user where Two-stage wins</span>
-            </button>
+            <div className="flex flex-col gap-0.5">
+              <button
+                type="button"
+                onClick={handleTryWinningUser}
+                className="h-8 px-2.5 bg-accent-subtle hover:bg-accent-subtle/80 border border-accent/30 rounded-lg text-xs font-semibold text-accent transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                title="Pick a user where Two-stage ranks their next watched film higher than Retrieval"
+              >
+                <Sparkles size={13} className="text-accent shrink-0" />
+                <span>Try a user where Two-stage wins</span>
+              </button>
+              <span className="text-[10px] text-text-muted/80 pl-1 leading-tight">Selected examples, not typical users.</span>
+            </div>
           </div>
 
           {/* Right controls: Random user and Show 5 / 10 */}
