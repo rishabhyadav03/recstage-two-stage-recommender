@@ -588,7 +588,7 @@ export default function EmbeddingMap({
             Each dot is a film. Films that people tend to like together sit close to each other.
           </p>
         </div>
-        <div className="w-full h-[20rem] lg:h-[26rem] bg-surface border border-border rounded-xl flex flex-col items-center justify-center p-6 text-center space-y-3">
+        <div className="w-full h-[20rem] lg:h-[30rem] bg-surface border border-border rounded-xl flex flex-col items-center justify-center p-6 text-center space-y-3">
           <p className="text-sm text-text-muted max-w-sm">
             {mapError}
           </p>
@@ -616,10 +616,10 @@ export default function EmbeddingMap({
         </p>
       </div>
 
-      {/* Canvas container with hairline border: 26rem on desktop, 20rem on mobile */}
+      {/* Canvas container with hairline border: 30rem on desktop, 20rem on mobile */}
       <div
         ref={containerRef}
-        className="relative w-full h-[20rem] lg:h-[26rem] border border-border/70 rounded-xl overflow-hidden bg-surface-2/30"
+        className="relative w-full h-[20rem] lg:h-[30rem] border border-border/70 rounded-xl overflow-hidden bg-surface-2/30"
       >
         <canvas
           ref={canvasRef}
@@ -688,8 +688,16 @@ export default function EmbeddingMap({
         )}
       </div>
 
-      {/* Legend: ONE row under the map */}
-      <div className="flex items-center gap-x-3 sm:gap-x-4 overflow-x-auto whitespace-nowrap text-xs text-text-muted py-0.5 no-scrollbar">
+      {/* Legend: wraps cleanly onto multiple rows as needed */}
+      <div
+        id="map-legend"
+        className="text-xs text-text-muted py-1"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '0.5rem 1.25rem',
+        }}
+      >
         {GENRE_GROUPS.map((group) => (
           <div key={group.name} className="inline-flex items-center gap-1.5 flex-shrink-0">
             <span
@@ -709,7 +717,9 @@ export default function EmbeddingMap({
             className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0"
             style={{ backgroundColor: accentColor }}
           />
-          <span className="text-text-main font-medium">User & Top Recs</span>
+          <span className="text-text-muted hover:text-text-main transition-colors font-medium">
+            User & top recs
+          </span>
         </div>
       </div>
 

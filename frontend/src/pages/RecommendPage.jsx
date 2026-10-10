@@ -290,11 +290,12 @@ export default function RecommendPage() {
             <div className="order-1">
               <UserSummaryCard userProfile={userProfile} loading={profileLoading} />
             </div>
-            <div className="order-3 mt-8">
+            <div className="order-3 mt-6">
               <ClosestTasteList
                 items={mapUserState?.top_retrieved}
                 loading={mapUserLoading}
                 onHover={setHighlightMovieId}
+                maxItems={4}
               />
             </div>
           </div>
