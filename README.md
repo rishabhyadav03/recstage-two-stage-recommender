@@ -156,33 +156,53 @@ If you prefer starting services individually:
 
 ## Deployment
 
-The application is architected for zero-cost cloud deployment: the FastAPI backend runs in a Docker container on **Hugging Face Spaces** (free CPU tier), and the React single-page application deploys on **Vercel**.
+The application is architected for zero-cost cloud deployment: the FastAPI backend runs on **Render** (free web service tier) with **Google Cloud Run** as a containerized fallback, while the React single-page application deploys on **Vercel**.
 
-### Backend (Hugging Face Spaces)
-The backend container is built from `Dockerfile.hf` (based on `python:3.11-slim` with PyTorch CPU wheel and LightGBM).
+### Backend (Render — Primary Web Service)
 
-1. Create a new Space on [Hugging Face](https://huggingface.co/new-space) with the **Docker** SDK (Blank template, free CPU hardware).
-2. Run the deployment helper to stage and inspect the deployment payload:
-   ```bash
-   # Linux/macOS
-   ./scripts/deploy_hf.sh https://huggingface.co/spaces/<username>/<space-name>
+The backend runs as a native Python web service managed via `render.yaml` (Render Blueprint) using lightweight, torch-free serving artifacts.
 
-   # Windows PowerShell
-   .\scripts\deploy_hf.ps1 https://huggingface.co/spaces/<username>/<space-name>
-   ```
-3. Push to your Space when prompted:
-   ```bash
-   git push origin main
-   ```
-4. **Free-Tier Behavior**: Hugging Face Spaces on the free tier sleep after 48 hours of inactivity. When a request arrives while sleeping, the container cold-starts, which takes approximately 45–60 seconds. The frontend includes an automatic retry handler that displays a friendly wake-up status banner during cold boots.
+1. Connect your GitHub repository to [Render](https://dashboard.render.com).
+2. Choose **New > Blueprint** and select this repository. Render automatically reads `render.yaml`:
+   - **Environment**: Python 3.11.9
+   - **Build Command**: `pip install -r requirements-deploy.txt`
+   - **Start Command**: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+   - **Health Check Path**: `/api/health`
+3. Configure Environment Variables in Render Dashboard:
+   - `CORS_ORIGINS`: Your Vercel frontend URL (e.g. `https://recstage.vercel.app` or `*`).
+   - `BUILD_SHA`: Optional deployment identifier or commit SHA.
+4. **Free-Tier Behavior**: Render free web services automatically sleep after **15 minutes** of no incoming traffic. When a request arrives while sleeping, the service spins up (cold start), which takes approximately **50–60 seconds**. The React frontend features an automatic health-polling retry handler that displays a friendly *"Waking up backend service..."* banner until the server responds, then seamlessly loads recommendations without requiring a page refresh.
 
-#### Backend Environment Variables (Hugging Face Space Settings)
+#### Backend Environment Variables
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CORS_ORIGINS` | `*` | Comma-separated list of allowed frontend origins (e.g. `https://your-app.vercel.app`) |
-| `BUILD_SHA` | *(None)* | Optional git short SHA passed to `/api/health` |
+| `BUILD_SHA` | `dev` | Optional deployment version passed to `/api/health` |
+
+---
+
+### Backend Fallback (Google Cloud Run)
+
+If you prefer serverless containers or higher free-tier request quotas, deploy the containerized backend to Cloud Run using `Dockerfile.cloudrun` (a multi-stage, non-root, torch-free container with OpenMP support):
+
+```bash
+gcloud run deploy recstage-api \
+  --source . \
+  --dockerfile Dockerfile.cloudrun \
+  --memory 1Gi \
+  --min-instances 0 \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars CORS_ORIGINS="https://your-app.vercel.app"
+```
+
+> [!TIP]
+> **Budget Alert**: Set a budget alert in your Google Cloud Console (e.g. at $1.00 or $5.00) to ensure zero unexpected costs beyond the free monthly tier (2M requests/month free).
+
+---
 
 ### Frontend (Vercel)
+
 The React application deploys as a static single-page application with SPA client-side routing via `frontend/vercel.json`.
 
 1. Import the repository in [Vercel](https://vercel.com/new).
@@ -192,12 +212,26 @@ The React application deploys as a static single-page application with SPA clien
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
 3. Set the environment variable in Vercel Project Settings:
-   - `VITE_API_URL`: Your Hugging Face Space URL (e.g. `https://<username>-<space-name>.hf.space`, without trailing slash).
+   - `VITE_API_URL`: Your Render backend service URL (e.g. `https://recstage-api.onrender.com`, without trailing slash).
 
 #### Frontend Environment Variables
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `VITE_API_URL` | *(empty)* | Base URL of the backend API (e.g. `https://<space-name>.hf.space`). Leave empty for local development to use Vite proxy. |
+| `VITE_API_URL` | *(empty)* | Base URL of the backend API (e.g. `https://recstage-api.onrender.com`). Leave empty for local development to use Vite proxy. |
+
+---
+
+### Repository Footprint
+
+All runtime model artifacts and metadata files are lightweight and directly version-controlled without requiring Git LFS:
+
+| Tracked File (> 1 MB) | Size | Purpose |
+| :--- | :--- | :--- |
+| `artifacts/dataset_cache.pkl` | 5.58 MB | Preprocessed MovieLens-1M dataset metadata & mappings |
+| `data/posters.json` | 2.74 MB | Cached TMDB poster images and movie overviews |
+| `artifacts/two_tower.pt` | 1.84 MB | PyTorch Two-Tower model weights (offline training/ablation) |
+| `artifacts/user_embeddings.npy` | 1.47 MB | Precomputed 64-dim user vectors for torch-free inference |
+| `frontend/public/logo.png` | 1.14 MB | High-resolution brand logo asset |
 
 ---
 
