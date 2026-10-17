@@ -1,7 +1,6 @@
 """Feature Engineering for Stage 2 Ranker."""
 from typing import Dict, List, Tuple, Optional
 import numpy as np
-import pandas as pd
 import logging
 from ml.data.dataset import MovieLensData
 

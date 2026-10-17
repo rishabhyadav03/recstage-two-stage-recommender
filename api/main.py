@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
 from fastapi import FastAPI, HTTPException, Query, Response, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +26,6 @@ from pydantic import BaseModel
 
 from ml.config import PipelineConfig
 from ml.data.dataset import MovieLensData, NUM_GENRES
-from ml.models.two_tower import TwoTowerModel
 from ml.models.vector_index import VectorIndex
 from ml.models.ranker import LambdaRanker
 from ml.features.feature_engineer import FeatureEngineer
@@ -46,6 +44,7 @@ class HealthResponse(BaseModel):
     version: str
     num_users: int
     num_items: int
+    torch_free: bool = True
 
 
 class ItemCard(BaseModel):
@@ -152,7 +151,7 @@ class CompareResponse(BaseModel):
 
 _cfg: Optional[PipelineConfig] = None
 _data: Optional[MovieLensData] = None
-_model: Optional[TwoTowerModel] = None
+_user_embeddings: Optional[np.ndarray] = None
 _index: Optional[VectorIndex] = None
 _ranker: Optional[LambdaRanker] = None
 _feature_eng: Optional[FeatureEngineer] = None
@@ -164,6 +163,7 @@ _embedding_map_raw: Optional[str] = None
 _embedding_map: Optional[List[Dict[str, Any]]] = None
 _movie_id_to_xy: Dict[int, Tuple[float, float]] = {}
 _movie_id_to_group: Dict[int, str] = {}
+_held_out_dict: Dict[int, Tuple[int, int]] = {}
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
@@ -173,6 +173,7 @@ POSTERS_FILE = DATA_DIR / "posters.json"
 WINNERS_FILE = ARTIFACTS_DIR / "winning_users.json"
 EMBEDDING_MAP_FILE = DATA_DIR / "embedding_map.json"
 DATASET_CACHE_FILE = ARTIFACTS_DIR / "dataset_cache.pkl"
+USER_EMBEDDINGS_FILE = ARTIFACTS_DIR / "user_embeddings.npy"
 
 GENRE_NAMES = [
     "Action", "Adventure", "Animation", "Children's", "Comedy", "Crime",
@@ -186,7 +187,7 @@ GENRE_NAMES = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _cfg, _data, _model, _index, _ranker, _feature_eng, _item_embeddings, _popularity_rank, _posters, _winning_users, _embedding_map_raw, _embedding_map, _movie_id_to_xy, _movie_id_to_group
+    global _cfg, _data, _user_embeddings, _index, _ranker, _feature_eng, _item_embeddings, _popularity_rank, _posters, _winning_users, _embedding_map_raw, _embedding_map, _movie_id_to_xy, _movie_id_to_group, _held_out_dict
     t0 = time.perf_counter()
     logger.info("Loading pipeline config and data...")
     _cfg = PipelineConfig.load()
@@ -202,6 +203,21 @@ async def lifespan(app: FastAPI):
             min_user_interactions=_cfg.data.min_user_interactions,
             positive_rating_threshold=_cfg.data.positive_rating_threshold,
         ).load_and_process()
+
+    # Pre-extract held-out test mapping and drop unused dataframes to minimize RSS
+    if _data is not None and hasattr(_data, "test_df") and _data.test_df is not None:
+        try:
+            for _, row in _data.test_df.iterrows():
+                _held_out_dict[int(row["u_idx"])] = (int(row["i_idx"]), int(row["movie_id"]))
+            _data.test_df = None
+            _data.users_df = None
+            _data.movies_df = None
+            _data.ratings_df = None
+            _data.train_df = None
+            _data.val_df = None
+            logger.info(f"Cached {len(_held_out_dict)} held-out test records and freed raw dataframes.")
+        except Exception as e:
+            logger.warning(f"Could not build held_out_dict: {e}")
 
     # Load posters if present
     if POSTERS_FILE.exists():
@@ -250,24 +266,20 @@ async def lifespan(app: FastAPI):
         _movie_id_to_xy = {}
         _movie_id_to_group = {}
 
-    logger.info("Loading Two-Tower model...")
-    _model = TwoTowerModel(
-        num_users=_data.num_users,
-        num_items=_data.num_items,
-        num_genres=NUM_GENRES,
-        embedding_dim=_cfg.retrieval.embedding_dim,
-    )
-    _model.load_state_dict(
-        torch.load(ARTIFACTS_DIR / "two_tower.pt", weights_only=True)
-    )
-    _model.eval()
+    logger.info("Loading precomputed user embeddings...")
+    if USER_EMBEDDINGS_FILE.exists():
+        _user_embeddings = np.load(str(USER_EMBEDDINGS_FILE), mmap_mode="r")
+        logger.info(f"Loaded user embeddings shape: {_user_embeddings.shape}")
+    else:
+        logger.warning(f"{USER_EMBEDDINGS_FILE} not found. Run scripts/export_serving_artifacts.py.")
+        _user_embeddings = None
 
     logger.info("Loading FAISS index...")
     _index = VectorIndex(dim=_cfg.retrieval.embedding_dim).load(
         str(ARTIFACTS_DIR / "faiss_index.bin")
     )
 
-    _item_embeddings = np.load(str(ARTIFACTS_DIR / "item_embeddings.npy"))
+    _item_embeddings = np.load(str(ARTIFACTS_DIR / "item_embeddings.npy"), mmap_mode="r")
 
     logger.info("Loading LambdaRanker...")
     _ranker = LambdaRanker().load(str(ARTIFACTS_DIR / "ranker.txt"))
@@ -285,7 +297,7 @@ async def lifespan(app: FastAPI):
 
     load_time = time.perf_counter() - t0
     logger.info(
-        f"All models loaded in {load_time:.2f}s: {_data.num_users} users, {_data.num_items} items."
+        f"All models loaded in {load_time:.2f}s: {_data.num_users} users, {_data.num_items} items (Torch-free serving)."
     )
     yield
 
@@ -330,22 +342,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # ---------------------------------------------------------------------------
 
 def _get_user_embedding(u_idx: int) -> np.ndarray:
-    u_meta = _data.user_meta[u_idx]
-    hist = _data.user_history_i_idx.get(u_idx, [])[-_cfg.data.last_n_watched :]
-    pad_len = _cfg.data.last_n_watched - len(hist)
-    padded_hist = [_data.num_items] * pad_len + hist
-
-    with torch.no_grad():
-        u_emb = _model.user_tower(
-            user_ids=torch.tensor([u_idx], dtype=torch.long),
-            gender_idx=torch.tensor([1 if u_meta["gender"] == "F" else 0], dtype=torch.long),
-            age_idx=torch.tensor([min(6, max(0, u_meta["age"] // 10))], dtype=torch.long),
-            occ_idx=torch.tensor([min(21, max(0, u_meta["occupation"]))], dtype=torch.long),
-            mean_rating=torch.tensor([u_meta["mean_rating"]], dtype=torch.float32),
-            top_genres=torch.from_numpy(_data.user_top_genres[u_idx : u_idx + 1]),
-            history_items=torch.tensor([padded_hist], dtype=torch.long),
-        ).cpu().numpy()[0]
-    return u_emb
+    if _user_embeddings is not None and 0 <= u_idx < len(_user_embeddings):
+        return _user_embeddings[u_idx]
+    raise HTTPException(status_code=404, detail=f"User embedding for index {u_idx} not found")
 
 
 def _get_poster_info(movie_id: int) -> Dict[str, Optional[str]]:
@@ -457,7 +456,8 @@ def _item_card(i_idx: int, u_emb: Optional[np.ndarray] = None, rank: int = 0, u_
 def health():
     """Liveness check — returns OK when all models are loaded."""
     models_status = {
-        "two_tower": _model is not None,
+        "two_tower": _user_embeddings is not None,
+        "user_embeddings": _user_embeddings is not None,
         "faiss_index": _index is not None,
         "ranker": _ranker is not None,
         "dataset": _data is not None,
@@ -470,6 +470,7 @@ def health():
         version=os.environ.get("BUILD_SHA", "dev"),
         num_users=_data.num_users if _data else 0,
         num_items=_data.num_items if _data else 0,
+        torch_free=True,
     )
 
 
@@ -803,10 +804,9 @@ def compare(
     held_out_info = None
     held_out_movie_id = None
     held_out_ranks = {"popularity": None, "retrieval_only": None, "two_stage": None}
-    test_rows = _data.test_df[_data.test_df["u_idx"] == u_idx]
-    if len(test_rows) > 0:
-        held_out_i = int(test_rows.iloc[0]["i_idx"])
-        held_out_movie_id = int(test_rows.iloc[0]["movie_id"])
+    held_out_entry = _held_out_dict.get(u_idx)
+    if held_out_entry is not None:
+        held_out_i, held_out_movie_id = held_out_entry
         h_meta = _data.item_meta[held_out_i]
         h_posters = _get_poster_info(held_out_movie_id)
 
