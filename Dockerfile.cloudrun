@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+# Install system dependencies (libgomp1 required for LightGBM OpenMP)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up non-root application user
+RUN useradd -m -u 1000 appuser
+USER appuser
+ENV HOME=/home/appuser \
+    PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
+
+WORKDIR /home/appuser/app
+
+# Install lightweight torch-free runtime dependencies
+COPY --chown=appuser:appuser requirements-deploy.txt .
+RUN pip install --no-cache-dir -r requirements-deploy.txt
+
+# Copy only runtime code, configs, artifacts, and metadata
+COPY --chown=appuser:appuser api/ ./api/
+COPY --chown=appuser:appuser ml/config.py ./ml/config.py
+COPY --chown=appuser:appuser ml/configs/ ./ml/configs/
+COPY --chown=appuser:appuser ml/data/ ./ml/data/
+COPY --chown=appuser:appuser ml/models/ ./ml/models/
+COPY --chown=appuser:appuser ml/features/ ./ml/features/
+COPY --chown=appuser:appuser artifacts/ ./artifacts/
+COPY --chown=appuser:appuser data/posters.json ./data/posters.json
+COPY --chown=appuser:appuser data/embedding_map.json ./data/embedding_map.json
+COPY --chown=appuser:appuser results/metrics.json ./results/metrics.json
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

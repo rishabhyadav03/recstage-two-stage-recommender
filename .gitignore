@@ -1,6 +1,7 @@
 # Environment & secrets
 .env
 .venv/
+.venv_deploy/
 venv/
 env/
 
