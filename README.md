@@ -2,9 +2,9 @@
 
 An end-to-end movie recommendation engine combining deep two-tower vector retrieval (FAISS) and gradient-boosted re-ranking (LightGBM LambdaRank) on the MovieLens 1M dataset, paired with an editorial web application.
 
-- **Live Demo**: coming soon
+**Live demo:** [recstage-two-stage-recommender.vercel.app](https://recstage-two-stage-recommender.vercel.app/)
 
----
+*The backend runs on a free tier, so the first load may take about 60 seconds to wake up.*
 
 ## Previews
 
